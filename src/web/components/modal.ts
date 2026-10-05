@@ -29,6 +29,26 @@ export function openModal(title: string, bodyHtml: string): { close: () => void;
   return { close, el: back.querySelector('[data-body]') as HTMLElement };
 }
 
+export const TX_CATEGORIES: Record<string, string[]> = {
+  expense: ['Makan', 'Transport', 'Belanja', 'Hiburan', 'Kesehatan', 'Pendidikan', 'Tagihan', 'Rumah Tangga', 'Lainnya'],
+  income: ['Gaji', 'Bonus', 'Hadiah', 'Bunga & Dividen', 'Lainnya'],
+  transfer: ['Pindah Dana'],
+};
+
+/** Preset options so categories stay consistent for grouping (no free typing). */
+export function catOptions(kind: string): string {
+  return (TX_CATEGORIES[kind] ?? TX_CATEGORIES.expense).map((c) => `<option>${c}</option>`).join('');
+}
+
+/** Re-fill the category select when the kind changes. */
+export function wireCatOptions(body: HTMLElement): void {
+  const kindSel = body.querySelector('#f-kind') as HTMLSelectElement | null;
+  const catSel = body.querySelector('#f-cat') as HTMLSelectElement | null;
+  if (!kindSel || !catSel) return;
+  kindSel.addEventListener('change', () => {
+    catSel.innerHTML = catOptions(kindSel.value);
+  });
+}
 export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'expense'): string {
   const accOpts = accounts.map((a) => `<option value="${a.id}">${a.name}</option>`).join('');
   return `
@@ -41,7 +61,7 @@ export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'ex
     <label for="f-amount">Nominal (Rp)</label><input id="f-amount" type="number" min="1" step="1" inputmode="numeric" required />
     <label for="f-acc">Dari akun</label><select id="f-acc">${accOpts}</select>
     <div id="f-to-wrap" style="display:none"><label for="f-to">Ke akun</label><select id="f-to">${accOpts}</select></div>
-    <label for="f-cat">Kategori</label><input id="f-cat" value="Lainnya" />
+    <label for="f-cat">Kategori</label><select id="f-cat">${catOptions(kind)}</select>
     <label for="f-note">Catatan</label><input id="f-note" placeholder="cth. Kopi" />
     <button class="btn-primary" id="f-save">Simpan</button>`;
 }

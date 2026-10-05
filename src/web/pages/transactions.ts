@@ -1,6 +1,6 @@
 import { api } from '../lib/api.js';
 import { formatIdr, fmtDate } from '../lib/format.js';
-import { openModal, txForm } from '../components/modal.js';
+import { openModal, txForm, wireCatOptions } from '../components/modal.js';
 import { isDesktop } from '../lib/state.js';
 
 interface Tx {
@@ -60,28 +60,33 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
       <div class="card">${txCards(filtered, accName)}</div>`;
   }
 
+  // Filter toolbar only exists on desktop; mobile uses card list without filters.
+  const tSearch = document.getElementById('t-search') as HTMLInputElement | null;
+  const tMonth = document.getElementById('t-month') as HTMLInputElement | null;
+  const tCat = document.getElementById('t-cat') as HTMLSelectElement | null;
+  const tAcc = document.getElementById('t-acc') as HTMLSelectElement | null;
   const rebind = () => {
-    fSearch = (document.getElementById('t-search') as HTMLInputElement)?.value ?? fSearch;
-    fMonth = (document.getElementById('t-month') as HTMLInputElement)?.value ?? fMonth;
-    fCat = (document.getElementById('t-cat') as HTMLSelectElement)?.value ?? '';
-    fAcc = (document.getElementById('t-acc') as HTMLSelectElement)?.value ?? '';
+    if (tSearch) fSearch = tSearch.value;
+    if (tMonth) fMonth = tMonth.value;
+    fCat = tCat?.value ?? '';
+    fAcc = tAcc?.value ?? '';
   };
-  (document.getElementById('t-search') as HTMLInputElement)?.addEventListener('input', () => {
-    fSearch = (document.getElementById('t-search') as HTMLInputElement).value;
+  tSearch?.addEventListener('input', () => {
+    fSearch = tSearch.value;
     renderTransactions(el);
-    const s = document.getElementById('t-search') as HTMLInputElement;
-    s.focus();
-    s.setSelectionRange(s.value.length, s.value.length);
+    const s = document.getElementById('t-search') as HTMLInputElement | null;
+    s?.focus();
+    if (s) s.setSelectionRange(s.value.length, s.value.length);
   });
-  document.getElementById('t-month')!.onchange = () => {
+  if (tMonth) tMonth.onchange = () => {
     rebind();
     renderTransactions(el);
   };
-  document.getElementById('t-cat')!.onchange = () => {
+  if (tCat) tCat.onchange = () => {
     rebind();
     renderTransactions(el);
   };
-  document.getElementById('t-acc')!.onchange = () => {
+  if (tAcc) tAcc.onchange = () => {
     rebind();
     renderTransactions(el);
   };
@@ -157,6 +162,7 @@ function openNew(el: HTMLElement, kind: string, accounts: Array<{ id: number; na
   };
   kindSel.onchange = sync;
   sync();
+  wireCatOptions(body);
   (body.querySelector('#f-save') as HTMLButtonElement).onclick = async () => {
     const v = (id: string) => (body.querySelector(id) as HTMLInputElement | HTMLSelectElement).value;
     try {

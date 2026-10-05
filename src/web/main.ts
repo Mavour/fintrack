@@ -3,7 +3,7 @@ import { todayLong } from './lib/format.js';
 import { priceStatus, type CachedPrice } from './lib/prices.js';
 import { isDesktop, isPrivat, togglePrivat } from './lib/state.js';
 import { icons } from './components/icons.js';
-import { openModal, txForm } from './components/modal.js';
+import { openModal, txForm, wireCatOptions } from './components/modal.js';
 import { renderHome } from './pages/home.js';
 import { renderPortfolio } from './pages/portfolio.js';
 import { renderTransactions } from './pages/transactions.js';
@@ -128,6 +128,7 @@ async function openQuickTx(kind: string): Promise<void> {
     };
     kindSel.onchange = sync;
     sync();
+    wireCatOptions(body);
     (body.querySelector('#f-save') as HTMLButtonElement).onclick = async () => {
       const v = (id: string) => (body.querySelector(id) as HTMLInputElement | HTMLSelectElement).value;
       try {
