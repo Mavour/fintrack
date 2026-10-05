@@ -292,6 +292,46 @@ table.data tr.clickable:hover td { background: #f6faf8; }
 }
 @keyframes sh { to { background-position: -200% 0; } }
 
+/* ---------- dark theme (toggle, persisted) ---------- */
+[data-theme="dark"] {
+  --bg: #0f151c;
+  --card: #17202a;
+  --border: #26313d;
+  --text: #e9eef4;
+  --muted: #93a0b1;
+  --soft: #1f2a36;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+[data-theme="dark"] .btn-ghost { color: var(--text); }
+[data-theme="dark"] .chip.active { background: var(--primary); border-color: var(--primary); }
+[data-theme="dark"] .qa-tile { color: var(--text); }
+[data-theme="dark"] .qa-tile .qa-ic { background: #1d3a30; color: #34d399; }
+[data-theme="dark"] .qa-tile:nth-child(2) .qa-ic { background: #1c3148; color: #60a5fa; }
+[data-theme="dark"] .qa-tile:nth-child(3) .qa-ic { background: #2a3340; color: #cbd5e1; }
+[data-theme="dark"] .qa-tile:nth-child(4) .qa-ic { background: #173a38; color: #2dd4bf; }
+[data-theme="dark"] .acc-card,
+[data-theme="dark"] .watch-card,
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] .modal { background: var(--card); }
+[data-theme="dark"] table.data tr.clickable:hover td { background: #1a2b25; }
+[data-theme="dark"] .pill.up { background: #123c2c; color: #34d399; }
+[data-theme="dark"] .pill.down { background: #44272a; color: #f0666b; }
+[data-theme="dark"] .badge.live { background: #123c2c; color: #34d399; border-color: #1e5c42; }
+[data-theme="dark"] .pos { color: #34d399; }
+[data-theme="dark"] .neg { color: #f0666b; }
+[data-theme="dark"] .acc-add { color: #34d399; }
+[data-theme="dark"] .btn-danger-ghost { background: #44272a; color: #f0666b; }
+[data-theme="dark"] .skeleton {
+  background: linear-gradient(90deg, var(--soft), var(--card), var(--soft));
+  background-size: 200% 100%;
+}
+[data-theme="dark"] .avatar { box-shadow: 0 0 0 1px var(--border); }
+[data-theme="dark"] #sidebar nav a { color: var(--muted); }
+[data-theme="dark"] #sidebar nav a:hover { background: var(--soft); color: var(--text); }
+[data-theme="dark"] #sidebar nav a.active { color: #34d399; }
+[data-theme="dark"] .type-chip { color: var(--text); }
+
 /* ---------- login ---------- */
 .login-wrap { max-width: 400px; margin: 8dvh auto 0; }
 

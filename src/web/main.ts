@@ -1,7 +1,7 @@
 import { api } from './lib/api.js';
 import { todayLong } from './lib/format.js';
 import { priceStatus, type CachedPrice } from './lib/prices.js';
-import { isDesktop, isPrivat, togglePrivat } from './lib/state.js';
+import { isDesktop, isPrivat, togglePrivat, getTheme, toggleTheme, applyTheme } from './lib/state.js';
 import { icons } from './components/icons.js';
 import { openModal, txForm, wireCatOptions } from './components/modal.js';
 import { renderHome } from './pages/home.js';
@@ -89,6 +89,7 @@ function renderPagehead(): void {
       ${desktop ? `<div class="quick-row" id="quick-row"></div>` : ''}
     </div>
     <div class="header-actions">
+      <button class="btn-ghost icon-btn" id="btn-theme" aria-label="Ganti tema gelap/terang" title="Mode gelap/terang">${getTheme() === 'dark' ? icons.sun : icons.moon}</button>
       <button class="btn-ghost" id="btn-privat" aria-pressed="${isPrivat()}">${isPrivat() ? 'Tampilkan' : 'Privat'}</button>
       ${desktop ? `<button class="btn-primary" id="btn-record">+ Catat Transaksi</button>` : ''}
     </div>`;
@@ -96,6 +97,10 @@ function renderPagehead(): void {
     togglePrivat();
     renderPagehead();
     route();
+  };
+  document.getElementById('btn-theme')!.onclick = (e) => {
+    const next = toggleTheme();
+    (e.currentTarget as HTMLButtonElement).innerHTML = next === 'dark' ? icons.sun : icons.moon;
   };
   if (desktop) {
     document.getElementById('btn-record')!.onclick = () => openQuickTx('expense');
@@ -186,6 +191,7 @@ document.addEventListener('keydown', (e) => {
 
 void refreshPriceBadge();
 setInterval(refreshPriceBadge, 60_000);
+applyTheme(getTheme());
 void route();
 
 if ('serviceWorker' in navigator) {

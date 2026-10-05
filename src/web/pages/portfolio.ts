@@ -40,7 +40,7 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
       <span class="pill ${data.floating_pl_idr >= 0 ? 'up' : 'down'}">P/L all-time ${isPrivat() ? '•••' : formatIdr(data.floating_pl_idr)}</span>
       <div style="margin-top:14px;background:var(--soft);border-radius:14px;padding:12px">
         <div class="eyebrow" style="margin-bottom:8px">Alokasi Profil Risiko</div>
-        <div class="alloc-bar" style="background:#e2e8f0">${riskRows.map(([, , v, c]) => `<span style="width:${((v / tv) * 100).toFixed(1)}%;background:${c}"></span>`).join('')}</div>
+        <div class="alloc-bar" style="background:var(--border)">${riskRows.map(([, , v, c]) => `<span style="width:${((v / tv) * 100).toFixed(1)}%;background:${c}"></span>`).join('')}</div>
         ${riskRows.map(([risk, label, v, c]) => `<div class="row muted" style="justify-content:space-between;font-size:12.5px"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${c};margin-right:6px"></span>${risk} (${label})</span><strong>${isPrivat() ? '•••' : formatIdr(v)}</strong></div>`).join('')}
       </div>
     </div>`;
@@ -135,17 +135,20 @@ async function assetCards(assets: AssetV[]): Promise<string> {
   return cards.join('');
 }
 
-/** Lazy-load sparklines for desktop table rows. */
+/** Lazy-load sparklines for desktop table rows (parallel). */
 async function bindRowEdit(el: HTMLElement): Promise<void> {
-  el.querySelectorAll('[data-spark]').forEach(async (cell) => {
-    const sym = (cell as HTMLElement).dataset.spark!;
-    try {
-      const hist = (await api.get(`/api/prices/history?symbol=${sym}`)) as Array<{ price_idr: number }>;
-      cell.innerHTML = sparkline(hist);
-    } catch {
-      cell.innerHTML = '<span class="muted">—</span>';
-    }
-  });
+  const cells = [...el.querySelectorAll('[data-spark]')];
+  await Promise.all(
+    cells.map(async (cell) => {
+      const sym = (cell as HTMLElement).dataset.spark!;
+      try {
+        const hist = (await api.get(`/api/prices/history?symbol=${sym}`)) as Array<{ price_idr: number }>;
+        cell.innerHTML = sparkline(hist);
+      } catch {
+        cell.innerHTML = '<span class="muted">—</span>';
+      }
+    }),
+  );
   el.querySelectorAll('[data-edit]').forEach((row) => {
     const open = () => openAssetForm(el, (row as HTMLElement).dataset.edit!);
     (row as HTMLElement).onclick = open;
