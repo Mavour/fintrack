@@ -1,5 +1,5 @@
 /* FinTrack service worker: app-shell cache + stale-while-revalidate for GET /api. */
-const SHELL = 'fintrack-shell-v1';
+const SHELL = 'fintrack-shell-v2';
 const SHELL_URLS = ['/', '/index.html', '/styles.css', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -33,15 +33,15 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
+  // App shell: network-first so code updates apply immediately;
+  // cache fallback keeps the app open when offline.
   event.respondWith(
-    caches.match(req).then(
-      (hit) =>
-        hit ??
-        fetch(req).then((res) => {
-          const copy = res.clone();
-          caches.open(SHELL).then((c) => c.put(req, copy));
-          return res;
-        }),
-    ),
+    fetch(req)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(SHELL).then((c) => c.put(req, copy));
+        return res;
+      })
+      .catch(() => caches.match(req)),
   );
 });
