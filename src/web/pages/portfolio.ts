@@ -3,7 +3,6 @@ import { formatIdr, formatPct } from '../lib/format.js';
 import { donut, PALETTE } from '../components/donut.js';
 import { sparkline } from '../components/sparkline.js';
 import { openModal } from '../components/modal.js';
-import { priceBadge } from '../lib/prices.js';
 import { isDesktop, isPrivat } from '../lib/state.js';
 
 let filter = 'Semua';
@@ -135,7 +134,6 @@ async function assetCards(assets: AssetV[]): Promise<string> {
           <div><span class="eyebrow">P/L</span><strong class="${dir}">${a.pl_idr != null ? show(a.pl_idr) : '—'}</strong>
             <div class="${dir}" style="font-size:12px;font-weight:700">${formatPct(a.pl_percent)}</div></div>
         </div>
-        <div style="margin-top:10px">${priceBadge(a.price_source, a.price_fetched_at, a.is_stale)}</div>
       </div>`;
     }),
   );
