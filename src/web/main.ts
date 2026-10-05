@@ -69,10 +69,20 @@ function renderChrome(): void {
     ).join('');
   }
   const title = TITLES[h] ?? 'Beranda';
+  const dark = getTheme() === 'dark';
   topbar.innerHTML = `
     <div class="brand"><span class="logo-box">${icons.trend}</span>
       <span><div class="brand-name">FinTrack</div><div class="brand-sub">${title}</div></span></div>
-    <div>${priceBadgeHtml}</div>`;
+    <div class="row">
+      <button class="theme-switch" id="btn-theme" role="switch" aria-checked="${dark}" aria-label="Mode gelap/terang" title="Mode gelap/terang">
+        <span class="ts-sun">${icons.sun}</span><span class="ts-knob"></span><span class="ts-moon">${icons.moon}</span>
+      </button>
+      <div>${priceBadgeHtml}</div>
+    </div>`;
+  document.getElementById('btn-theme')!.onclick = (e) => {
+    const next = toggleTheme();
+    (e.currentTarget as HTMLButtonElement).setAttribute('aria-checked', String(next === 'dark'));
+  };
 }
 
 /** Page header: title + date left; privat + record button right (desktop). */
@@ -89,7 +99,6 @@ function renderPagehead(): void {
       ${desktop ? `<div class="quick-row" id="quick-row"></div>` : ''}
     </div>
     <div class="header-actions">
-      <button class="btn-ghost icon-btn" id="btn-theme" aria-label="Ganti tema gelap/terang" title="Mode gelap/terang">${getTheme() === 'dark' ? icons.sun : icons.moon}</button>
       <button class="btn-ghost" id="btn-privat" aria-pressed="${isPrivat()}">${isPrivat() ? 'Tampilkan' : 'Privat'}</button>
       ${desktop ? `<button class="btn-primary" id="btn-record">+ Catat Transaksi</button>` : ''}
     </div>`;
@@ -97,10 +106,6 @@ function renderPagehead(): void {
     togglePrivat();
     renderPagehead();
     route();
-  };
-  document.getElementById('btn-theme')!.onclick = (e) => {
-    const next = toggleTheme();
-    (e.currentTarget as HTMLButtonElement).innerHTML = next === 'dark' ? icons.sun : icons.moon;
   };
   if (desktop) {
     document.getElementById('btn-record')!.onclick = () => openQuickTx('expense');
