@@ -39,8 +39,8 @@ async function refreshPriceBadge(): Promise<void> {
     const st = priceStatus(prices);
     priceBadgeHtml =
       st.mode === 'live'
-        ? `<span class="badge live"><span class="dot pulse"></span>Sinkron Live • ${st.detail}</span>`
-        : `<span class="badge"><span class="dot"></span>Harga manual • ${st.detail}</span>`;
+        ? `<span class="badge live"><span class="dot pulse"></span>Sinkron Live<span class="b-detail"> • ${st.detail}</span></span>`
+        : `<span class="badge"><span class="dot"></span>Harga manual<span class="b-detail"> • ${st.detail}</span></span>`;
   } catch {
     priceBadgeHtml = `<span class="badge"><span class="dot"></span>Harga manual</span>`;
   }

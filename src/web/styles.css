@@ -181,7 +181,7 @@ input::placeholder { color: var(--muted); }
 #bottomnav svg { width: 23px; height: 23px; }
 
 /* ---------- page header ---------- */
-#pagehead { padding: 16px 14px 0; }
+#pagehead { padding: 16px 14px 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 #pagehead .title { font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
 #pagehead .date { color: var(--muted); font-size: 13px; }
 .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -369,7 +369,14 @@ table.data tr.clickable:hover td { background: #f6faf8; }
 /* ---------- login ---------- */
 .login-wrap { max-width: 400px; margin: 8dvh auto 0; }
 
-/* ---------- tablet: keep mobile pattern, wider ---------- */
+/* ---------- compact topbar on small phones ---------- */
+@media (max-width: 639px) {
+  #topbar { padding: 10px 12px; gap: 8px; }
+  #topbar .badge { font-size: 11.5px; padding: 4px 9px; }
+  #topbar .badge .b-detail { display: none; }
+  #topbar .theme-switch { width: 60px; }
+  #topbar .theme-switch[aria-checked="true"] .ts-knob { transform: translateX(26px); }
+}
 @media (min-width: 640px) and (max-width: 899px) {
   #app, #pagehead { max-width: 560px; margin-left: auto; margin-right: auto; }
   .tiles { grid-template-columns: repeat(4, 1fr); }
