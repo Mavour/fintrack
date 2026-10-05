@@ -123,7 +123,7 @@ function recentTx(
   if (txs.length === 0) return '<div class="empty">Belum ada transaksi</div>';
   return `<table class="data" style="min-width:0"><tbody>${txs
     .map(
-      (t) => `<tr><td><strong>${t.category}</strong><div class="muted">${t.note || ''} • ${t.occurred_at.slice(0, 10)}</div></td>
+      (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${t.category}</strong><div class="muted">${t.note || ''} • ${t.occurred_at.slice(0, 10)}</div></td>
     <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : 'pos'}"><strong>${t.kind === 'expense' ? '−' : '+'}${formatIdr(t.amount_idr)}</strong></td></tr>`,
     )
     .join('')}</tbody></table>`;

@@ -16,7 +16,7 @@ export async function renderAccounts(el: HTMLElement): Promise<void> {
   </div>
   <div class="card"><strong>Daftar Akun</strong>
     ${accounts.map((a) => `
-      <div class="between" style="padding:12px 0;border-bottom:1px solid var(--soft)">
+      <div class="acc-item between">
         <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px">${a.name[0]}</span>
         <div><strong>${a.name}</strong><div class="muted">${a.type.replace('_', ' ')}${a.is_active ? '' : ' • nonaktif'}</div>
         <div style="font-weight:800">${isPrivat() ? '••••••' : formatIdr(a.balance_idr)}</div></div></div>
