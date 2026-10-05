@@ -21,6 +21,16 @@ export function formatPct(n: number | null): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+/** USD with $ prefix; tiny prices (<$1) get 4 decimals. */
+export function formatUsd(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return '—';
+  const digits = Math.abs(n) < 1 ? 4 : 2;
+  return (
+    '$' +
+    n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  );
+}
+
 export function timeAgo(iso: string | null): string {
   if (!iso) return 'belum pernah';
   const t = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();

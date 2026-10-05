@@ -1,6 +1,14 @@
 import type Database from 'better-sqlite3';
 import { fetchWithTimeout, withRetry } from './types.js';
 
+/** Read cached USD/IDR without network. Null when never fetched. */
+export function getCachedUsdIdr(db: Database.Database): number | null {
+  const row = db.prepare('SELECT rate FROM fx_cache WHERE pair = ?').get('USDIDR') as
+    | { rate: number }
+    | undefined;
+  return row?.rate ?? null;
+}
+
 /** USD/IDR rate with 1-hour cache in fx_cache. Falls back to 16000 on total failure. */
 export function createFxRateProvider(db: Database.Database, ttlMs: number) {
   return async function getUsdIdr(): Promise<number> {

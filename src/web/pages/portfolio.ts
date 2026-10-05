@@ -1,5 +1,5 @@
 import { api } from '../lib/api.js';
-import { formatIdr, formatPct } from '../lib/format.js';
+import { formatIdr, formatPct, formatUsd } from '../lib/format.js';
 import { donut, PALETTE } from '../components/donut.js';
 import { sparkline } from '../components/sparkline.js';
 import { openModal } from '../components/modal.js';
@@ -11,9 +11,33 @@ const show = (n: number) => (isPrivat() ? '••••••' : formatIdr(n));
 interface AssetV {
   symbol: string; type: string; name: string; qty: string;
   avg_buy_price_idr: number; current_price_idr: number | null;
-  current_value_idr: number | null; cost_idr: number;
+  current_value_idr: number | null; current_price_usd: number | null;
+  current_value_usd: number | null; cost_idr: number;
   pl_idr: number | null; pl_percent: number | null;
   price_source: string | null; price_fetched_at: string | null; is_stale: boolean;
+}
+
+function usdNote(v: number | null, isCrypto: boolean): string {
+  if (!isCrypto || v === null) return '';
+  return ` <span class="muted">(${formatUsd(v)})</span>`;
+}
+
+function plCell(a: AssetV): string {
+  if (a.pl_idr === null) {
+    const hint = a.avg_buy_price_idr === 0 ? 'harga beli belum diisi' : '—';
+    return `<div class="muted">P/L disembunyikan (${hint})</div>`;
+  }
+  const dir = a.pl_idr >= 0 ? 'pos' : 'neg';
+  return `<strong class="${dir}">${show(a.pl_idr)}</strong>
+    <div class="${dir}" style="font-size:12px;font-weight:700">${formatPct(a.pl_percent)}</div>`;
+}
+
+function plBlock(a: AssetV): string {
+  if (a.pl_idr === null) {
+    const hint = a.avg_buy_price_idr === 0 ? ' — harga beli belum diisi' : '';
+    return `<span class="muted">—${hint}</span>`;
+  }
+  return formatPct(a.pl_percent);
 }
 
 export async function renderPortfolio(el: HTMLElement): Promise<void> {
@@ -103,9 +127,9 @@ function assetTable(assets: AssetV[]): string {
       <td><div class="row"><span class="avatar" style="width:34px;height:34px;font-size:14px">${a.symbol[0]}</span><strong>${a.symbol}</strong></div></td>
       <td><span class="type-chip">${a.type}</span></td>
       <td style="text-align:right">${a.qty}</td>
-      <td style="text-align:right">${a.current_price_idr != null ? show(a.current_price_idr) : '—'}</td>
-      <td style="text-align:right"><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong></td>
-      <td style="text-align:right" class="${(a.pl_percent ?? 0) >= 0 ? 'pos' : 'neg'}">${formatPct(a.pl_percent)}</td>
+      <td style="text-align:right">${a.current_price_idr != null ? show(a.current_price_idr) : '—'}${a.type === 'crypto' && a.current_price_usd != null ? `<div class="muted">${formatUsd(a.current_price_usd)}</div>` : ''}</td>
+      <td style="text-align:right"><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong>${a.type === 'crypto' && a.current_value_usd != null ? `<div class="muted">${formatUsd(a.current_value_usd)}</div>` : ''}</td>
+      <td style="text-align:right" class="${(a.pl_percent ?? 0) >= 0 ? 'pos' : 'neg'}">${plBlock(a)}</td>
       <td style="text-align:right">${(((a.current_value_idr ?? 0) / tv) * 100).toFixed(1)}%</td>
       <td data-spark="${a.symbol}"><span class="muted">…</span></td></tr>`,
     )
@@ -120,19 +144,18 @@ async function assetCards(assets: AssetV[]): Promise<string> {
       try {
         hist = (await api.get(`/api/prices/history?symbol=${a.symbol}`)) as typeof hist;
       } catch { /* keep cache */ }
-      const dir = (a.pl_idr ?? 0) >= 0 ? 'pos' : 'neg';
+      const isCrypto = a.type === 'crypto';
       return `<div class="card asset-card" data-edit="${a.symbol}" tabindex="0" role="button" aria-label="Ubah ${a.symbol}">
         <div class="row" style="align-items:center">
           <div class="avatar">${a.symbol[0]}</div>
           <div class="grow"><strong>${a.symbol}</strong> <span class="type-chip">${a.type}</span>
-            <div class="muted">${a.qty} × ${a.current_price_idr != null ? show(a.current_price_idr) : '—'}</div>
+            <div class="muted">${a.qty} × ${a.current_price_idr != null ? show(a.current_price_idr) : '—'}${usdNote(a.current_price_usd, isCrypto)}</div>
           </div>
           <div style="flex:none">${sparkline(hist, 84, 30)}</div>
         </div>
         <div class="asset-stats">
-          <div><span class="eyebrow">Nilai</span><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong></div>
-          <div><span class="eyebrow">P/L</span><strong class="${dir}">${a.pl_idr != null ? show(a.pl_idr) : '—'}</strong>
-            <div class="${dir}" style="font-size:12px;font-weight:700">${formatPct(a.pl_percent)}</div></div>
+          <div><span class="eyebrow">Nilai</span><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong>${usdNote(a.current_value_usd, isCrypto)}</div>
+          <div><span class="eyebrow">P/L</span>${plCell(a)}</div>
         </div>
       </div>`;
     }),
@@ -172,7 +195,7 @@ function openAssetForm(el: HTMLElement, symbol?: string): void {
     <label for="a-type">Tipe</label><select id="a-type"><option value="crypto">crypto</option><option value="saham">saham (.JK)</option><option value="reksadana">reksadana</option></select>
     ${symbol ? '' : '<label for="a-sym">Simbol (cth. HYPE / BBCA.JK)</label><input id="a-sym" />'}
     <label for="a-qty">Jumlah (qty)</label><input id="a-qty" value="1" inputmode="decimal" />
-    <label for="a-buy">Harga beli rata-rata (Rp)</label><input id="a-buy" type="number" min="0" value="0" />
+    <label for="a-buy">Harga beli rata-rata (Rp) — kosongkan bila lupa</label><input id="a-buy" type="number" min="0" placeholder="cth. 1500000" inputmode="numeric" />
     <label for="a-now">Harga sekarang manual (opsional, untuk reksadana)</label><input id="a-now" type="number" min="0" />
     <button class="btn-primary" id="a-save">Simpan</button>
     ${symbol ? '<button class="btn-danger-ghost" id="a-del" style="width:100%;margin-top:8px">Hapus aset</button>' : ''}`);

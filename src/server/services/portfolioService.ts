@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { parseQty, qtyTimesPriceIdr, costBasis, plNominal, plPercent } from './money.js';
+import { getCachedUsdIdr } from '../providers/fxRate.js';
+import { Decimal } from 'decimal.js';
 
 export const AssetTypeSchema = z.enum(['crypto', 'saham', 'reksadana']);
 export type AssetType = z.infer<typeof AssetTypeSchema>;
@@ -39,7 +41,11 @@ export interface Asset {
 export interface AssetValuation extends Asset {
   current_price_idr: number | null;
   current_value_idr: number | null;
+  /** USD equivalents for crypto (converted with cached FX rate). Null when unavailable. */
+  current_price_usd: number | null;
+  current_value_usd: number | null;
   cost_idr: number;
+  /** Null when buy price unknown (avg_buy_price_idr = 0) — P/L is hidden in UI. */
   pl_idr: number | null;
   pl_percent: number | null;
   price_source: string | null;
@@ -94,12 +100,22 @@ export function valuateAsset(
   const cached = db.prepare('SELECT * FROM price_cache WHERE symbol = ?').get(asset.symbol) as
     | { price_idr: number; source: string; fetched_at: string }
     | undefined;
-  const cost = costBasis(asset.qty, asset.avg_buy_price_idr);
+  // avg_buy_price_idr = 0 means "unknown" (user forgot) -> hide P/L instead of showing nonsense.
+  const buyKnown = asset.avg_buy_price_idr > 0;
+  const cost = buyKnown ? costBasis(asset.qty, asset.avg_buy_price_idr) : 0;
+  const toUsd = (priceIdr: number | null): number | null => {
+    if (priceIdr === null || asset.type !== 'crypto') return null;
+    const rate = getCachedUsdIdr(db);
+    if (!rate) return null;
+    return new Decimal(priceIdr).div(rate).toNumber();
+  };
   if (!cached) {
     return {
       ...asset,
       current_price_idr: null,
       current_value_idr: null,
+      current_price_usd: null,
+      current_value_usd: null,
       cost_idr: cost,
       pl_idr: null,
       pl_percent: null,
@@ -109,15 +125,18 @@ export function valuateAsset(
     };
   }
   const currentValue = qtyTimesPriceIdr(asset.qty, cached.price_idr);
-  const pl = plNominal(currentValue, cost);
+  const priceUsd = toUsd(cached.price_idr);
+  const valueUsd = priceUsd === null ? null : parseQty(asset.qty).times(priceUsd).toNumber();
   const stale = nowMs - new Date(cached.fetched_at + 'Z').getTime() > STALE_THRESHOLD_MS;
   return {
     ...asset,
     current_price_idr: cached.price_idr,
     current_value_idr: currentValue,
+    current_price_usd: priceUsd,
+    current_value_usd: valueUsd,
     cost_idr: cost,
-    pl_idr: pl,
-    pl_percent: plPercent(currentValue, cost),
+    pl_idr: buyKnown ? plNominal(currentValue, cost) : null,
+    pl_percent: buyKnown ? plPercent(currentValue, cost) : null,
     price_source: cached.source,
     price_fetched_at: cached.fetched_at,
     is_stale: stale,

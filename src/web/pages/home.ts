@@ -1,5 +1,5 @@
 import { api } from '../lib/api.js';
-import { formatIdr, formatCompactIdr, formatPct } from '../lib/format.js';
+import { formatIdr, formatCompactIdr, formatPct, formatUsd } from '../lib/format.js';
 import { donut, PALETTE, ALLOC_COLORS } from '../components/donut.js';
 import { isDesktop, isPrivat } from '../lib/state.js';
 import { icons } from '../components/icons.js';
@@ -21,7 +21,7 @@ export async function renderHome(el: HTMLElement): Promise<void> {
       Array<{ category: string; note: string; amount_idr: number; occurred_at: string; kind: string }>
     >,
     api.get('/api/portfolio').catch(() => null) as Promise<{
-      assets: Array<{ symbol: string; type: string; current_price_idr: number | null; current_value_idr: number | null; pl_percent: number | null }>;
+      assets: Array<{ symbol: string; type: string; current_price_idr: number | null; current_value_idr: number | null; current_price_usd: number | null; pl_percent: number | null }>;
     } | null>,
   ]);
 
@@ -83,6 +83,7 @@ export async function renderHome(el: HTMLElement): Promise<void> {
         .map(
           (a) => `<div class="watch-card"><div class="between"><span class="w-sym">${a.symbol}</span><span class="type-chip">${a.type}</span></div>
         <div class="w-price" style="margin-top:6px">${a.current_price_idr != null ? show(a.current_price_idr) : '—'}</div>
+        ${a.type === 'crypto' && a.current_price_usd != null ? `<div class="muted" style="font-size:11.5px">${formatUsd(a.current_price_usd)}</div>` : ''}
         <span class="pill ${(a.pl_percent ?? 0) >= 0 ? 'up' : 'down'}">${formatPct(a.pl_percent)}</span></div>`,
         )
         .join('');
