@@ -15,6 +15,7 @@ export async function renderAccounts(el: HTMLElement): Promise<void> {
     <button class="btn-primary" id="btn-add">+ Akun</button></div>
   </div>
   <div class="card"><strong>Daftar Akun</strong>
+    <div class="acc-list">
     ${accounts.map((a) => `
       <div class="acc-item between">
         <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px">${a.name[0]}</span>

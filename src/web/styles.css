@@ -398,14 +398,18 @@ table.data tr.clickable:hover td { background: #f6faf8; }
     display: flex; justify-content: space-between; align-items: flex-start; gap: 14px;
   }
   #app { max-width: var(--content-max); padding: 16px 28px 40px; }
-  .grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+  .grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
   .span8 { grid-column: span 8; } .span7 { grid-column: span 7; }
   .span6 { grid-column: span 6; } .span5 { grid-column: span 5; }
   .span4 { grid-column: span 4; } .span3 { grid-column: span 3; }
   .span12 { grid-column: span 12; }
   .card { margin-bottom: 0; }
+  .card + .card { margin-top: 20px; }
   .grid12 > .card { height: 100%; }
-  .acc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .grid12 > .card + .card { margin-top: 0; }
+  .acc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .acc-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .acc-list .acc-item { margin-top: 0; }
   .modal-back { align-items: center; padding: 20px; }
   .modal { max-width: 480px; border-radius: 24px; padding: 24px; }
   .modal::before { display: none; }
