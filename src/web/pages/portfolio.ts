@@ -121,14 +121,21 @@ async function assetCards(assets: AssetV[]): Promise<string> {
       try {
         hist = (await api.get(`/api/prices/history?symbol=${a.symbol}`)) as typeof hist;
       } catch { /* keep cache */ }
+      const dir = (a.pl_idr ?? 0) >= 0 ? 'pos' : 'neg';
       return `<div class="card asset-card" data-edit="${a.symbol}" tabindex="0" role="button" aria-label="Ubah ${a.symbol}">
-        <div class="avatar">${a.symbol[0]}</div>
-        <div class="grow"><div class="between"><strong>${a.symbol}</strong>${priceBadge(a.price_source, a.price_fetched_at, a.is_stale)}</div>
-          <div class="muted">${a.type} • ${a.qty} × ${a.current_price_idr != null ? show(a.current_price_idr) : '—'}</div>
-          <div style="margin-top:4px"><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong>
-          <span class="${(a.pl_idr ?? 0) >= 0 ? 'pos' : 'neg'}">${a.pl_idr != null ? `${show(a.pl_idr)} (${formatPct(a.pl_percent)})` : ''}</span></div>
+        <div class="row" style="align-items:center">
+          <div class="avatar">${a.symbol[0]}</div>
+          <div class="grow"><strong>${a.symbol}</strong> <span class="type-chip">${a.type}</span>
+            <div class="muted">${a.qty} × ${a.current_price_idr != null ? show(a.current_price_idr) : '—'}</div>
+          </div>
+          <div style="flex:none">${sparkline(hist, 84, 30)}</div>
         </div>
-        <div>${sparkline(hist)}</div>
+        <div class="asset-stats">
+          <div><span class="eyebrow">Nilai</span><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong></div>
+          <div><span class="eyebrow">P/L</span><strong class="${dir}">${a.pl_idr != null ? show(a.pl_idr) : '—'}</strong>
+            <div class="${dir}" style="font-size:12px;font-weight:700">${formatPct(a.pl_percent)}</div></div>
+        </div>
+        <div style="margin-top:10px">${priceBadge(a.price_source, a.price_fetched_at, a.is_stale)}</div>
       </div>`;
     }),
   );

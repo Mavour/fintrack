@@ -250,8 +250,14 @@ input::placeholder { color: var(--muted); }
   display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 17px;
   background: linear-gradient(135deg, var(--primary), var(--teal));
 }
-.asset-card { display: flex; gap: 12px; align-items: flex-start; }
-.asset-card .grow { flex: 1; min-width: 0; }
+.asset-card { display: block; }
+.asset-card .grow { flex: 1; min-width: 0; overflow-wrap: break-word; }
+.asset-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--soft);
+}
+.asset-stats .eyebrow { display: block; margin-bottom: 3px; }
 
 /* ---------- tables (desktop) ---------- */
 .tbl-wrap { overflow-x: auto; margin: 0 -20px; padding: 0 20px; }
