@@ -1,10 +1,10 @@
 {
-  "name": "Dompet Saya",
-  "short_name": "Dompet",
+  "name": "FinTrack — Dompet Saya",
+  "short_name": "FinTrack",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#6d28d9",
+  "background_color": "#f8fafc",
+  "theme_color": "#0e9f6e",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]

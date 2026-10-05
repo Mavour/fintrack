@@ -6,7 +6,13 @@ export function sparkline(points: Array<{ price_idr: number }>, w = 110, h = 32)
   const max = Math.max(...vals);
   const span = max - min || 1;
   const step = w / (vals.length - 1);
-  const d = vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - ((v - min) / span) * (h - 4) - 2).toFixed(1)}`).join(' ');
+  const d = vals
+    .map(
+      (v, i) =>
+        `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - ((v - min) / span) * (h - 4) - 2).toFixed(1)}`,
+    )
+    .join(' ');
   const up = vals[vals.length - 1] >= vals[0];
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><path d="${d}" fill="none" stroke="${up ? '#16a34a' : '#dc2626'}" stroke-width="2"/></svg>`;
+  const color = up ? '#0e9f6e' : '#e5484d';
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Tren harga 7 hari"><title>Tren 7 hari</title><path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"/></svg>`;
 }

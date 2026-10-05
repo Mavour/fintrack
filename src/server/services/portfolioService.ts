@@ -128,21 +128,26 @@ export function listValuations(db: Database.Database, type?: AssetType): AssetVa
   return listAssets(db, type).map((a) => valuateAsset(db, a));
 }
 
-/** Diversification score 0-100: based on Herfindahl across asset types + count. */
+/** Diversification score 0-100 based on normalized Shannon entropy of asset weights.
+ *  Evenly spread assets score high; a single dominant asset scores low. */
 export function diversificationScore(valuations: AssetValuation[]): number {
   const withValue = valuations.filter((v) => (v.current_value_idr ?? 0) > 0);
-  if (withValue.length === 0) return 0;
+  if (withValue.length <= 1) return 0;
   const total = withValue.reduce((s, v) => s + (v.current_value_idr ?? 0), 0);
-  const byType = new Map<string, number>();
-  for (const v of withValue) byType.set(v.type, (byType.get(v.type) ?? 0) + (v.current_value_idr ?? 0));
-  let hhi = 0;
-  for (const val of byType.values()) {
-    const share = val / total;
-    hhi += share * share;
+  if (total <= 0) return 0;
+  let entropy = 0;
+  for (const v of withValue) {
+    const w = (v.current_value_idr ?? 0) / total;
+    if (w > 0) entropy -= w * Math.log(w);
   }
-  // HHI 1/n..1 -> score inverted to 0..100. Bonus for holding >=3 assets.
-  const n = byType.size;
-  const base = n <= 1 ? 0 : ((1 - hhi) / (1 - 1 / n)) * 100;
-  const bonus = Math.min(withValue.length * 2, 10);
-  return Math.round(Math.min(100, base * 0.9 + bonus));
+  return Math.round((entropy / Math.log(withValue.length)) * 100);
+}
+
+/** Indonesian label for a diversification score. */
+export function diversificationLabel(score: number): string {
+  if (score <= 20) return 'Sangat terpusat';
+  if (score <= 40) return 'Terpusat';
+  if (score <= 60) return 'Cukup merata';
+  if (score <= 80) return 'Baik';
+  return 'Sangat baik';
 }

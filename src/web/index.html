@@ -3,15 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Dompet Saya — Dashboard Keuangan</title>
+    <title>FinTrack — Dompet Saya</title>
+    <meta name="description" content="Catat pengeluaran dan lacak portofolio: saham IDX, crypto, reksadana." />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#6d28d9" />
+    <meta name="theme-color" content="#0e9f6e" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div id="app"></div>
-    <nav id="bottomnav"></nav>
-    <button id="fab" aria-label="Tambah">+</button>
+    <div id="shell">
+      <aside id="sidebar" aria-label="Navigasi utama"></aside>
+      <div id="main">
+        <header id="topbar"></header>
+        <div id="pagehead"></div>
+        <main id="app" tabindex="-1"></main>
+      </div>
+      <nav id="bottomnav" aria-label="Navigasi utama"></nav>
+    </div>
+    <div id="modal-root"></div>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>

@@ -8,6 +8,7 @@ import {
   UpsertAssetSchema,
   AssetTypeSchema,
   diversificationScore,
+  diversificationLabel,
 } from '../services/portfolioService.js';
 
 export function registerPortfolioRoutes(app: FastifyInstance, db: Database.Database): void {
@@ -16,12 +17,14 @@ export function registerPortfolioRoutes(app: FastifyInstance, db: Database.Datab
     const vals = listValuations(db, q.type);
     const totalValue = vals.reduce((s, v) => s + (v.current_value_idr ?? 0), 0);
     const totalCost = vals.reduce((s, v) => s + v.cost_idr, 0);
+    const score = diversificationScore(vals);
     return {
       assets: vals,
       total_value_idr: totalValue,
       total_cost_idr: totalCost,
       floating_pl_idr: totalValue - totalCost,
-      diversification_score: diversificationScore(vals),
+      diversification_score: score,
+      diversification_label: diversificationLabel(score),
     };
   });
 

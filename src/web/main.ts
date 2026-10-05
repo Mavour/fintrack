@@ -1,24 +1,159 @@
+import { api } from './lib/api.js';
+import { todayLong } from './lib/format.js';
+import { priceStatus, type CachedPrice } from './lib/prices.js';
+import { isDesktop, isPrivat, togglePrivat } from './lib/state.js';
+import { icons } from './components/icons.js';
+import { openModal, txForm } from './components/modal.js';
 import { renderHome } from './pages/home.js';
 import { renderPortfolio } from './pages/portfolio.js';
 import { renderTransactions } from './pages/transactions.js';
 import { renderAccounts } from './pages/accounts.js';
 import { renderLogin } from './pages/login.js';
 
+const sidebar = document.getElementById('sidebar')!;
+const bottomnav = document.getElementById('bottomnav')!;
+const topbar = document.getElementById('topbar')!;
+const pagehead = document.getElementById('pagehead')!;
 const app = document.getElementById('app')!;
-const nav = document.getElementById('bottomnav')!;
 
-const links = [
-  { hash: '#/', label: 'Beranda', icon: '⌂' },
-  { hash: '#/portofolio', label: 'Portofolio', icon: '◈' },
-  { hash: '#/transaksi', label: 'Transaksi', icon: '⇄' },
-  { hash: '#/akun', label: 'Akun & Bank', icon: '🏦' },
+const NAV = [
+  { hash: '#/', label: 'Beranda', icon: icons.wallet },
+  { hash: '#/portofolio', label: 'Portofolio', icon: icons.chart },
+  { hash: '#/transaksi', label: 'Transaksi', icon: icons.receipt },
+  { hash: '#/akun', label: 'Akun & Bank', icon: icons.bank },
 ];
 
-nav.innerHTML = links.map((l) => `<a href="${l.hash}"><div>${l.icon}</div>${l.label}</a>`).join('');
+const TITLES: Record<string, string> = {
+  '#/': 'Beranda',
+  '#/portofolio': 'Portofolio',
+  '#/transaksi': 'Transaksi',
+  '#/akun': 'Akun & Bank',
+  '#/masuk': 'Masuk',
+};
+
+let priceBadgeHtml = `<span class="badge"><span class="dot"></span>Memuat harga…</span>`;
+
+async function refreshPriceBadge(): Promise<void> {
+  try {
+    const prices = (await api.get('/api/prices')) as CachedPrice[];
+    const st = priceStatus(prices);
+    priceBadgeHtml =
+      st.mode === 'live'
+        ? `<span class="badge live"><span class="dot pulse"></span>Sinkron Live • ${st.detail}</span>`
+        : `<span class="badge"><span class="dot"></span>Harga manual • ${st.detail}</span>`;
+  } catch {
+    priceBadgeHtml = `<span class="badge"><span class="dot"></span>Harga manual</span>`;
+  }
+  renderChrome();
+}
+
+/** Render sidebar XOR bottom nav — never both. Bottom nav node is emptied on desktop. */
+function renderChrome(): void {
+  const h = location.hash.split('?')[0] || '#/';
+  const desktop = isDesktop();
+  if (desktop) {
+    bottomnav.innerHTML = '';
+    bottomnav.style.display = 'none';
+    sidebar.style.display = 'flex';
+    sidebar.innerHTML = `
+      <div class="side-logo"><span class="logo-box">${icons.trend}</span>
+        <span><div class="brand-name">FinTrack</div><div class="brand-sub">Dompet Saya</div></span></div>
+      <nav>${NAV.map((l) => `<a href="${l.hash}" class="${h === l.hash || (h === '' && l.hash === '#/') ? 'active' : ''}">${l.icon}<span>${l.label}</span></a>`).join('')}</nav>
+      <div class="side-foot"><div class="muted" style="margin-bottom:6px">Status harga</div>${priceBadgeHtml}</div>`;
+  } else {
+    sidebar.innerHTML = '';
+    sidebar.style.display = 'none';
+    bottomnav.style.display = 'flex';
+    bottomnav.innerHTML = NAV.map(
+      (l) => `<a href="${l.hash}" class="${h === l.hash || (h === '' && l.hash === '#/') ? 'active' : ''}">${l.icon}<span>${l.label}</span></a>`,
+    ).join('');
+  }
+  const title = TITLES[h] ?? 'Beranda';
+  topbar.innerHTML = `
+    <div class="brand"><span class="logo-box">${icons.trend}</span>
+      <span><div class="brand-name">FinTrack</div><div class="brand-sub">${title}</div></span></div>
+    <div>${priceBadgeHtml}</div>`;
+}
+
+/** Page header: title + date left; privat + record button right (desktop). */
+function renderPagehead(): void {
+  const h = location.hash.split('?')[0] || '#/';
+  if (h === '#/masuk') {
+    pagehead.innerHTML = '';
+    return;
+  }
+  const title = TITLES[h] ?? 'Beranda';
+  const desktop = isDesktop();
+  pagehead.innerHTML = `
+    <div><div class="title">${title}</div><div class="date">${todayLong()}</div>
+      ${desktop ? `<div class="quick-row" id="quick-row"></div>` : ''}
+    </div>
+    <div class="header-actions">
+      <button class="btn-ghost" id="btn-privat" aria-pressed="${isPrivat()}">${isPrivat() ? 'Tampilkan' : 'Privat'}</button>
+      ${desktop ? `<button class="btn-primary" id="btn-record">+ Catat Transaksi</button>` : ''}
+    </div>`;
+  document.getElementById('btn-privat')!.onclick = () => {
+    togglePrivat();
+    renderPagehead();
+    route();
+  };
+  if (desktop) {
+    document.getElementById('btn-record')!.onclick = () => openQuickTx('expense');
+    const qr = document.getElementById('quick-row')!;
+    const items: Array<[string, string]> = [
+      ['expense', 'Pengeluaran'],
+      ['income', 'Top Up'],
+      ['transfer', 'Transfer'],
+      ['invest', 'Investasi'],
+    ];
+    qr.innerHTML = items.map(([k, l]) => `<button data-q="${k}">${l}</button>`).join('');
+    qr.querySelectorAll('[data-q]').forEach(
+      (b) => ((b as HTMLElement).onclick = () => openQuickTx((b as HTMLElement).dataset.q!)),
+    );
+  }
+}
+
+async function openQuickTx(kind: string): Promise<void> {
+  try {
+    const accounts = (await api.get('/api/accounts')) as Array<{ id: number; name: string }>;
+    if (accounts.length === 0) {
+      location.hash = '#/akun';
+      return;
+    }
+    const { close, el: body } = openModal('Catat Transaksi', txForm(accounts, kind === 'invest' ? 'expense' : kind));
+    const kindSel = body.querySelector('#f-kind') as HTMLSelectElement;
+    const toWrap = body.querySelector('#f-to-wrap') as HTMLElement;
+    const sync = () => {
+      toWrap.style.display = kindSel.value === 'transfer' ? 'block' : 'none';
+    };
+    kindSel.onchange = sync;
+    sync();
+    (body.querySelector('#f-save') as HTMLButtonElement).onclick = async () => {
+      const v = (id: string) => (body.querySelector(id) as HTMLInputElement | HTMLSelectElement).value;
+      try {
+        await api.post('/api/transactions', {
+          kind: v('#f-kind'),
+          amount_idr: Number((body.querySelector('#f-amount') as HTMLInputElement).value),
+          account_id: Number(v('#f-acc')),
+          ...(v('#f-kind') === 'transfer' ? { to_account_id: Number(v('#f-to')) } : {}),
+          category: v('#f-cat') || 'Lainnya',
+          note: v('#f-note'),
+        });
+        close();
+        route();
+      } catch (e) {
+        alert((e as Error).message);
+      }
+    };
+  } catch (e) {
+    if ((e as Error).message === 'Belum masuk') location.hash = '#/masuk';
+  }
+}
 
 async function route(): Promise<void> {
-  const h = location.hash.split('?')[0];
-  nav.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === h || (h === '' && a.getAttribute('href') === '#/')));
+  renderChrome();
+  renderPagehead();
+  const h = location.hash.split('?')[0] || '#/';
   try {
     if (h === '#/portofolio') await renderPortfolio(app);
     else if (h === '#/transaksi') await renderTransactions(app);
@@ -26,26 +161,32 @@ async function route(): Promise<void> {
     else if (h === '#/masuk') await renderLogin(app);
     else await renderHome(app);
   } catch (e) {
-    app.innerHTML = `<div class="card empty">Gagal memuat: ${(e as Error).message}</div>`;
-  }
-  // Polling ringan harga tiap 60 detik di halaman portofolio/beranda tanpa reload.
-  if ((h === '#/portofolio' || h === '' || h === '#/') && !location.hash.includes('masuk')) {
-    // next poll handled by timer below
+    app.innerHTML = `<div class="card empty"><div class="big">!</div>Gagal memuat: ${(e as Error).message}</div>`;
   }
 }
 
+window.matchMedia('(min-width: 900px)').addEventListener?.('change', () => {
+  renderChrome();
+  renderPagehead();
+  route();
+});
 window.addEventListener('hashchange', route);
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
+    const t = e.target as HTMLElement;
+    if (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA') return;
+    if (!isDesktop()) return;
+    const h = location.hash.split('?')[0] || '#/';
+    if (h === '#/masuk') return;
+    e.preventDefault();
+    openQuickTx('expense');
+  }
+});
+
+void refreshPriceBadge();
+setInterval(refreshPriceBadge, 60_000);
 void route();
 
-// Light polling: re-render watchlist prices every 60s without full reload.
-setInterval(() => {
-  const h = location.hash.split('?')[0];
-  if (h === '#/portofolio' || h === '' || h === '#/' || h === '#') route();
-}, 60_000);
-
 if ('serviceWorker' in navigator) {
-  // Minimal PWA: no offline cache yet, just registers if sw.js exists.
-  fetch('/sw.js', { method: 'HEAD' }).then((r) => {
-    if (r.ok) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
-  }).catch(() => undefined);
+  navigator.serviceWorker.register('/sw.js').catch(() => undefined);
 }
