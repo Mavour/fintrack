@@ -45,13 +45,20 @@ function isValidSolanaAddress(addr: string): boolean {
 
 /**
  * Fetch all holdings of a Solana wallet (native SOL + SPL tokens).
- * Fully keyless: Jupiter Ultra holdings + verified token metadata.
+ * Fully keyless: free Lite endpoint (60 req/min), fallback to main endpoint.
  */
 export async function fetchSolanaHoldings(address: string): Promise<ChainHolding[]> {
   if (!isValidSolanaAddress(address)) throw Object.assign(new Error('Alamat Solana tidak valid'), { statusCode: 400 });
-  const res = await withRetry(() =>
-    fetchWithTimeout(`https://api.jup.ag/ultra/v1/holdings/${address}`, 15_000),
-  );
+  let res: Response;
+  try {
+    res = await withRetry(() =>
+      fetchWithTimeout(`https://lite-api.jup.ag/ultra/v1/holdings/${address}`, 15_000),
+    );
+  } catch {
+    res = await withRetry(() =>
+      fetchWithTimeout(`https://api.jup.ag/ultra/v1/holdings/${address}`, 15_000),
+    );
+  }
   if (!res.ok) throw new Error(`Jupiter holdings HTTP ${res.status}`);
   const data = (await res.json()) as UltraHoldings;
   const meta = await tokenMap().catch(() => new Map<string, JupToken>());

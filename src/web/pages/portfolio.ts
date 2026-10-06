@@ -237,7 +237,7 @@ async function openWalletSync(el: HTMLElement): Promise<void> {
   const lastAddr = localStorage.getItem('fintrack-wallet-addr') ?? '';
   const { close, el: body } = openModal(
     'Sinkron Dompet',
-    `<p class="muted" style="margin-top:0">Hanya alamat publik (watch-only). Tanpa private key / seed phrase.</p>
+    `<p class="muted" style="margin-top:0">Hanya alamat publik (watch-only). Tanpa private key / seed phrase. Harga beli otomatis = harga pasar saat pertama disinkron (khusus yang belum diisi).</p>
     <label for="w-chain">Jaringan</label><select id="w-chain">${chains.map((c) => `<option value="${c.id}" ${c.id === lastChain ? 'selected' : ''}>${c.label}</option>`).join('')}</select>
     <label for="w-addr">Alamat wallet</label><input id="w-addr" value="${lastAddr}" placeholder="cth. 3keq…Xpd" autocomplete="off" />
     <button class="btn-primary" id="w-preview">Lihat Pratinjau</button>

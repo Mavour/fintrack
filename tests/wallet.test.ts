@@ -69,6 +69,7 @@ describe('wallet sync', () => {
     stubJupiter();
     const db = memDb();
     db.prepare(`INSERT INTO assets (type, symbol, qty, avg_buy_price_idr) VALUES ('crypto','USDC','1',15000)`).run();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source) VALUES ('USDC', 16000, 'manual')`).run();
     const imported = await importHoldings(db, 'solana', SOL);
     expect(imported.find((i) => i.symbol === 'USDC')?.qty).toBe('5');
     const row = db.prepare('SELECT qty, avg_buy_price_idr FROM assets WHERE symbol = ?').get('USDC') as {
@@ -82,7 +83,19 @@ describe('wallet sync', () => {
       avg_buy_price_idr: number;
     };
     expect(sol.qty).toBe('1');
-    expect(sol.avg_buy_price_idr).toBe(0); // unknown -> P/L hidden
+    expect(sol.avg_buy_price_idr).toBe(0); // no cached price -> P/L hidden
+    db.close();
+  });
+
+  it('import auto-fills buy price from market when unknown', async () => {
+    stubJupiter();
+    const db = memDb();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source) VALUES ('USDC', 16000, 'manual')`).run();
+    await importHoldings(db, 'solana', SOL, ['USDC']);
+    const row = db.prepare('SELECT avg_buy_price_idr FROM assets WHERE symbol = ?').get('USDC') as {
+      avg_buy_price_idr: number;
+    };
+    expect(row.avg_buy_price_idr).toBe(16000); // first-seen market price, P/L tracks from sync
     db.close();
   });
 });

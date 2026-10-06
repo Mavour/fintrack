@@ -45,8 +45,10 @@ export async function previewHoldings(db: Database.Database, chain: string, addr
 }
 
 /**
- * Import holdings as crypto assets. Qty follows the chain (source of truth);
- * an existing avg buy price is preserved, otherwise 0 = unknown (P/L hidden).
+ * Import holdings as crypto assets. Qty follows the chain (source of truth).
+ * Buy price: kept when already known; otherwise auto-filled with the current
+ * market price at first sync (so P/L tracks from that moment, no typing needed).
+ * Unknown price -> avg stays 0 and P/L is hidden.
  */
 export async function importHoldings(
   db: Database.Database,
@@ -63,12 +65,16 @@ export async function importHoldings(
     // Skip dust / placeholder symbols without real identity.
     if (h.symbol === '???' || h.symbol.includes('…')) continue;
     const existing = getAssetBySymbol(db, h.symbol);
+    const avg =
+      existing && existing.avg_buy_price_idr > 0
+        ? existing.avg_buy_price_idr
+        : (h.price_idr ?? 0);
     upsertAsset(db, {
       type: 'crypto',
       symbol: h.symbol,
       name: existing?.name || h.name,
       qty: h.qty,
-      avg_buy_price_idr: existing && existing.avg_buy_price_idr > 0 ? existing.avg_buy_price_idr : 0,
+      avg_buy_price_idr: avg,
     });
     out.push({ symbol: h.symbol, qty: h.qty });
   }
