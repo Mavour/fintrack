@@ -168,7 +168,7 @@ function assetTable(assets: AssetV[]): string {
       <td style="text-align:right"><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong>${a.type === 'crypto' && a.current_value_usd != null ? `<div class="muted">${formatUsd(a.current_value_usd)}</div>` : ''}</td>
       <td style="text-align:right" class="${(a.pl_percent ?? 0) >= 0 ? 'pos' : 'neg'}">${plBlock(a)}</td>
       <td style="text-align:right">${(((a.current_value_idr ?? 0) / tv) * 100).toFixed(1)}%</td>
-      <td data-spark="${a.symbol}"><span class="muted">…</span></td></tr>`,
+      <td>${a.symbol.startsWith('LP-') ? '<span class="muted">—</span>' : `<span data-sparkwrap="${a.symbol}"><span class="muted">…</span></span>`}</td></tr>`,
     )
     .join('')}</tbody></table>`;
 }
@@ -177,10 +177,14 @@ async function assetCards(assets: AssetV[]): Promise<string> {
   if (assets.length === 0) return `<div class="card empty"><div class="big">◈</div>Belum ada aset. Tambahkan HYPE, SOL, atau BBCA.JK.</div>`;
   const cards = await Promise.all(
     assets.map(async (a) => {
+      // LP positions track pool value, not a tradable price series — no chart.
+      const isLp = a.symbol.startsWith('LP-');
       let hist: Array<{ price_idr: number }> = [];
-      try {
-        hist = (await api.get(`/api/prices/history?symbol=${a.symbol}&limit=500`)) as typeof hist;
-      } catch { /* keep cache */ }
+      if (!isLp) {
+        try {
+          hist = (await api.get(`/api/prices/history?symbol=${a.symbol}&limit=500`)) as typeof hist;
+        } catch { /* keep cache */ }
+      }
       const isCrypto = a.type === 'crypto';
       return `<div class="card asset-card" data-edit="${a.symbol}" tabindex="0" role="button" aria-label="Ubah ${a.symbol}">
         <div class="row" style="align-items:center">
@@ -188,7 +192,7 @@ async function assetCards(assets: AssetV[]): Promise<string> {
           <div class="grow"><strong>${a.symbol}</strong> <span class="type-chip">${a.type}</span>
             <div class="muted">${a.qty} × ${a.current_price_idr != null ? show(a.current_price_idr) : '—'}${usdNote(a.current_price_usd, isCrypto)}</div>
           </div>
-          <div style="flex:none">${sparkline(hist, 84, 30)}</div>
+          <div style="flex:none">${isLp ? '<span class="muted">—</span>' : sparkline(hist, 84, 30)}</div>
         </div>
         <div class="asset-stats">
           <div><span class="eyebrow">Nilai</span><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong>${usdNote(a.current_value_usd, isCrypto)}</div>
@@ -202,10 +206,10 @@ async function assetCards(assets: AssetV[]): Promise<string> {
 
 /** Lazy-load sparklines for desktop table rows (parallel). */
 async function bindRowEdit(el: HTMLElement): Promise<void> {
-  const cells = [...el.querySelectorAll('[data-spark]')];
+  const cells = [...el.querySelectorAll('[data-sparkwrap]')];
   await Promise.all(
     cells.map(async (cell) => {
-      const sym = (cell as HTMLElement).dataset.spark!;
+      const sym = (cell as HTMLElement).dataset.sparkwrap!;
       try {
         const hist = (await api.get(`/api/prices/history?symbol=${sym}&limit=500`)) as Array<{ price_idr: number }>;
         cell.innerHTML = sparkline(hist);
