@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { previewHoldings, importHoldings } from '../src/server/services/walletService.js';
+import { JupiterPriceProvider } from '../src/server/providers/jupiterPrice.js';
 
 const SOL = '3keq3cRtYuoPCYBUL4s6N52ePguGivSZpNU4fzSiPXpd';
 
@@ -84,6 +85,34 @@ describe('wallet sync', () => {
     };
     expect(sol.qty).toBe('1');
     expect(sol.avg_buy_price_idr).toBe(0); // no cached price -> P/L hidden
+    db.close();
+  });
+
+  it('hoodi without API key fails with friendly message', async () => {
+    const db = memDb();
+    await expect(
+      previewHoldings(db, 'hoodi', '0xcc66dc8c9b4e597536740c04c6a0932770e3bafe'),
+    ).rejects.toThrow(/API key/i);
+    db.close();
+  });
+
+  it('jupiter provider prices mints by CoinGecko-free path', async () => {
+    const db = memDb();
+    db.prepare(`INSERT INTO fx_cache (pair, rate) VALUES ('USDIDR', 16000)`).run();
+    db.prepare(`INSERT INTO asset_map (symbol, provider, provider_id) VALUES ('WIF','jupiter','EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm')`).run();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm: { usdPrice: 1.5 } }),
+      })),
+    );
+    const p = new JupiterPriceProvider(db, async () => 16000);
+    const out = await p.fetch(['WIF']);
+    expect(out).toHaveLength(1);
+    expect(out[0].priceIdr).toBe(24000);
+    expect(out[0].source).toBe('jupiter');
     db.close();
   });
 

@@ -2,9 +2,10 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { fetchSolanaHoldings, type ChainHolding } from '../providers/solana.js';
 import { fetchEvmHoldings, EVM_CHAINS } from '../providers/evm.js';
+import { fetchEtherscanHoldings } from '../providers/etherscan.js';
 import { upsertAsset, getAssetBySymbol } from './portfolioService.js';
 
-export const ChainSchema = z.enum(['solana', ...EVM_CHAINS] as [string, ...string[]]);
+export const ChainSchema = z.enum(['solana', ...EVM_CHAINS, 'hoodi'] as [string, ...string[]]);
 export type Chain = z.infer<typeof ChainSchema>;
 
 export const PreviewQuerySchema = z.object({
@@ -24,10 +25,19 @@ export interface HoldingPreview extends ChainHolding {
   already_tracked: boolean;
 }
 
-export async function previewHoldings(db: Database.Database, chain: string, address: string): Promise<HoldingPreview[]> {
+export async function previewHoldings(
+  db: Database.Database,
+  chain: string,
+  address: string,
+  etherscanKey = '',
+): Promise<HoldingPreview[]> {
   const { chain: c, address: a } = PreviewQuerySchema.parse({ chain, address });
   const holdings: ChainHolding[] =
-    c === 'solana' ? await fetchSolanaHoldings(a) : await fetchEvmHoldings(a, c);
+    c === 'solana'
+      ? await fetchSolanaHoldings(a)
+      : c === 'hoodi'
+        ? await fetchEtherscanHoldings(a, c, etherscanKey)
+        : await fetchEvmHoldings(a, c);
   const priceRows = db.prepare('SELECT symbol, price_idr FROM price_cache').all() as Array<{
     symbol: string;
     price_idr: number;
@@ -55,9 +65,10 @@ export async function importHoldings(
   chain: string,
   address: string,
   symbols?: string[],
+  etherscanKey = '',
 ): Promise<Array<{ symbol: string; qty: string }>> {
   const parsed = ImportBodySchema.parse({ chain, address, symbols });
-  const preview = await previewHoldings(db, parsed.chain, parsed.address);
+  const preview = await previewHoldings(db, parsed.chain, parsed.address, etherscanKey);
   const wanted = parsed.symbols?.map((s) => s.toUpperCase());
   const out: Array<{ symbol: string; qty: string }> = [];
   for (const h of preview) {
@@ -76,6 +87,14 @@ export async function importHoldings(
       qty: h.qty,
       avg_buy_price_idr: avg,
     });
+    // Register Solana mint for Jupiter price-by-mint (never overrides CoinGecko).
+    if (parsed.chain === 'solana' && h.ref) {
+      db.prepare(
+        `INSERT INTO asset_map (symbol, provider, provider_id, updated_at)
+         VALUES (?, 'jupiter', ?, datetime('now'))
+         ON CONFLICT(symbol) DO NOTHING`,
+      ).run(h.symbol, h.ref);
+    }
     out.push({ symbol: h.symbol, qty: h.qty });
   }
   return out;

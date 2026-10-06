@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { CoinGeckoProvider } from './coingecko.js';
 import { BinanceProvider } from './binance.js';
+import { JupiterPriceProvider } from './jupiterPrice.js';
 import { YahooFinanceProvider, isMarketOpen } from './yahooFinance.js';
 import { createFxRateProvider } from './fxRate.js';
 import { storePrices } from './priceStore.js';
@@ -29,6 +30,14 @@ export async function refreshCrypto(db: Database.Database, opts: OrchestratorOpt
       const fallback = new BinanceProvider(fx);
       const fb = await fallback.fetch(missing);
       storePrices(db, fb);
+      for (const p of fb) got.add(p.symbol);
+    }
+    // Solana tokens by mint (Jupiter): covers memecoins CoinGecko doesn't list.
+    const stillMissing = symbols.filter((s) => !got.has(s));
+    if (stillMissing.length > 0) {
+      const jup = new JupiterPriceProvider(db, fx);
+      const jp = await jup.fetch(stillMissing);
+      storePrices(db, jp);
     }
   } catch (e) {
     logger.warn({ err: e }, 'crypto refresh failed, keeping cache');

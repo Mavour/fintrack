@@ -7,6 +7,7 @@ export function getConfig() {
     appPassword: process.env.APP_PASSWORD ?? '',
     nodeEnv: process.env.NODE_ENV ?? 'development',
     coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
+    etherscanApiKey: process.env.ETHERSCAN_API_KEY ?? '',
     binanceEnabled: (process.env.BINANCE_ENABLED ?? 'true') === 'true',
     yahooEnabled: (process.env.YAHOO_ENABLED ?? 'true') === 'true',
     fxCacheTtlMs: Number(process.env.FX_CACHE_TTL_MS ?? 3_600_000),

@@ -230,20 +230,33 @@ function openAssetForm(el: HTMLElement, symbol?: string): void {
 
 /** Sync holdings from a public wallet address (Solana via Jupiter, EVM via explorer). */
 async function openWalletSync(el: HTMLElement): Promise<void> {
-  const { chains } = (await api.get('/api/wallets/chains')) as {
-    chains: Array<{ id: string; label: string }>;
+  const { chains, etherscan_configured } = (await api.get('/api/wallets/chains')) as {
+    chains: Array<{ id: string; label: string; needs_key: boolean }>;
+    etherscan_configured: boolean;
   };
   const lastChain = localStorage.getItem('fintrack-wallet-chain') ?? 'solana';
   const lastAddr = localStorage.getItem('fintrack-wallet-addr') ?? '';
   const { close, el: body } = openModal(
     'Sinkron Dompet',
     `<p class="muted" style="margin-top:0">Hanya alamat publik (watch-only). Tanpa private key / seed phrase. Harga beli otomatis = harga pasar saat pertama disinkron (khusus yang belum diisi).</p>
-    <label for="w-chain">Jaringan</label><select id="w-chain">${chains.map((c) => `<option value="${c.id}" ${c.id === lastChain ? 'selected' : ''}>${c.label}</option>`).join('')}</select>
+    <label for="w-chain">Jaringan</label><select id="w-chain">${chains.map((c) => `<option value="${c.id}" ${c.id === lastChain ? 'selected' : ''}>${c.label}${c.needs_key ? ' (butuh API key)' : ''}</option>`).join('')}</select>
+    <div class="muted" id="w-keyhint" style="margin-top:4px"></div>
     <label for="w-addr">Alamat wallet</label><input id="w-addr" value="${lastAddr}" placeholder="cth. 3keq…Xpd" autocomplete="off" />
     <button class="btn-primary" id="w-preview">Lihat Pratinjau</button>
     <div id="w-list" style="margin-top:12px"></div>`,
   );
   const list = body.querySelector('#w-list') as HTMLElement;
+  const chainSel = body.querySelector('#w-chain') as HTMLSelectElement;
+  const keyHint = body.querySelector('#w-keyhint') as HTMLElement;
+  const syncHint = () => {
+    const needs = chains.find((c) => c.id === chainSel.value)?.needs_key;
+    keyHint.textContent =
+      needs && !etherscan_configured
+        ? 'Jaringan ini perlu API key Etherscan gratis — daftar di etherscan.io lalu isi ETHERSCAN_API_KEY di .env dan restart.'
+        : '';
+  };
+  chainSel.addEventListener('change', syncHint);
+  syncHint();
   (body.querySelector('#w-preview') as HTMLButtonElement).onclick = async (e) => {
     const btn = e.target as HTMLButtonElement;
     const chain = (body.querySelector('#w-chain') as HTMLSelectElement).value;
