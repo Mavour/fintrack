@@ -81,6 +81,7 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
       <div style="display:grid;gap:8px;margin-top:12px">
         <button class="btn-primary" id="btn-add">+ Tambah Aset</button>
         <button class="btn-ghost" id="btn-sync">Perbarui Harga</button>
+        <button class="btn-ghost" id="btn-wallet">Sinkron Dompet</button>
       </div>
     </div>`;
 
@@ -112,6 +113,7 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
     renderPortfolio(el);
   };
   document.getElementById('btn-add')!.onclick = () => openAssetForm(el);
+  document.getElementById('btn-wallet')!.onclick = () => openWalletSync(el);
   if (isDesktop()) bindRowEdit(el);
 }
 
@@ -224,4 +226,68 @@ function openAssetForm(el: HTMLElement, symbol?: string): void {
       renderPortfolio(el);
     };
   }
+}
+
+/** Sync holdings from a public wallet address (Solana via Jupiter, EVM via explorer). */
+async function openWalletSync(el: HTMLElement): Promise<void> {
+  const { chains } = (await api.get('/api/wallets/chains')) as {
+    chains: Array<{ id: string; label: string }>;
+  };
+  const lastChain = localStorage.getItem('fintrack-wallet-chain') ?? 'solana';
+  const lastAddr = localStorage.getItem('fintrack-wallet-addr') ?? '';
+  const { close, el: body } = openModal(
+    'Sinkron Dompet',
+    `<p class="muted" style="margin-top:0">Hanya alamat publik (watch-only). Tanpa private key / seed phrase.</p>
+    <label for="w-chain">Jaringan</label><select id="w-chain">${chains.map((c) => `<option value="${c.id}" ${c.id === lastChain ? 'selected' : ''}>${c.label}</option>`).join('')}</select>
+    <label for="w-addr">Alamat wallet</label><input id="w-addr" value="${lastAddr}" placeholder="cth. 3keq…Xpd" autocomplete="off" />
+    <button class="btn-primary" id="w-preview">Lihat Pratinjau</button>
+    <div id="w-list" style="margin-top:12px"></div>`,
+  );
+  const list = body.querySelector('#w-list') as HTMLElement;
+  (body.querySelector('#w-preview') as HTMLButtonElement).onclick = async (e) => {
+    const btn = e.target as HTMLButtonElement;
+    const chain = (body.querySelector('#w-chain') as HTMLSelectElement).value;
+    const address = (body.querySelector('#w-addr') as HTMLInputElement).value.trim();
+    if (!address) {
+      alert('Isi alamat wallet dulu');
+      return;
+    }
+    btn.textContent = 'Memuat…';
+    try {
+      const data = (await api.get(`/api/wallets/preview?chain=${chain}&address=${encodeURIComponent(address)}`)) as {
+        holdings: Array<{ symbol: string; name: string; qty: string; price_idr: number | null; already_tracked: boolean }>;
+      };
+      localStorage.setItem('fintrack-wallet-chain', chain);
+      localStorage.setItem('fintrack-wallet-addr', address);
+      if (data.holdings.length === 0) {
+        list.innerHTML = '<div class="empty">Tidak ada token bersistaldo di alamat ini.</div>';
+        return;
+      }
+      list.innerHTML =
+        data.holdings
+          .map(
+            (h) => `<label class="row" style="gap:10px;padding:9px 0;border-bottom:1px solid var(--soft);cursor:pointer">
+            <input type="checkbox" data-sym="${h.symbol}" checked style="width:20px;height:20px;min-height:20px" />
+            <span style="flex:1"><strong>${h.symbol}</strong><div class="muted">${h.name} • ${h.qty}${h.already_tracked ? ' • sudah dilacak' : ''}</div></span>
+            <strong>${h.price_idr != null ? formatIdr(h.price_idr) : '—'}</strong></label>`,
+          )
+          .join('') + `<button class="btn-primary" id="w-import" style="margin-top:12px">Impor yang dipilih</button>`;
+      (list.querySelector('#w-import') as HTMLButtonElement).onclick = async () => {
+        const symbols = [...list.querySelectorAll('input[data-sym]:checked')].map(
+          (c) => (c as HTMLInputElement).dataset.sym!,
+        );
+        if (symbols.length === 0) {
+          alert('Pilih minimal satu token');
+          return;
+        }
+        await api.post('/api/wallets/import', { chain, address, symbols });
+        close();
+        renderPortfolio(el);
+      };
+    } catch (err) {
+      list.innerHTML = `<div class="empty">Gagal: ${(err as Error).message}</div>`;
+    } finally {
+      btn.textContent = 'Lihat Pratinjau';
+    }
+  };
 }

@@ -43,6 +43,15 @@ sudo systemctl reload caddy
 
 Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
 
+## Sinkron dompet onchain (bebas API key)
+- **Solana**: tempel alamat publik di Portofolio → Sinkron Dompet. Saldo diambil
+  dari Jupiter Ultra holdings + metadata token terverifikasi (tanpa API key).
+- **EVM** (Ethereum, Arbitrum, Base, Optimism, Polygon): via explorer Blockscout
+  publik (tanpa API key). Harga mengikuti provider CoinGecko yang sudah ada.
+- Hanya alamat publik (watch-only). Qty mengikuti onchain; harga beli lama
+  dipertahankan bila ada (kalau tidak, P/L disembunyikan). Token tak dikenal
+  (tanpa simbol) dilewati otomatis.
+
 ## Catatan harga
 - `MET`: tidak ditebak — `verifyMetMapping()` memakai CoinGecko `/search`,
   memilih kandidat simbol MET berperingkat pasar tertinggi, menyimpan ke `asset_map`.

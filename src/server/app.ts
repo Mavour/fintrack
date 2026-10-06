@@ -12,6 +12,7 @@ import { registerAccountRoutes } from './routes/accounts.js';
 import { registerTransactionRoutes } from './routes/transactions.js';
 import { registerPortfolioRoutes } from './routes/portfolio.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
+import { registerWalletRoutes } from './routes/wallets.js';
 import { registerAuthRoutes, ensurePassword, isSessionValid, getPasswordHash } from './routes/auth.js';
 import { startScheduler } from './jobs/scheduler.js';
 
@@ -44,7 +45,7 @@ export async function buildApp() {
   registerTransactionRoutes(app, db);
   registerPortfolioRoutes(app, db);
   registerDashboardRoutes(app, db);
-
+  registerWalletRoutes(app, db);
   // Serve built frontend if present.
   const publicDir = path.resolve('dist/public');
   if (fs.existsSync(publicDir)) {

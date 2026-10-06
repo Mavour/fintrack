@@ -33,6 +33,8 @@ function seedAssetMap(database: Database.Database): void {
     ['SOL', 'coingecko', 'solana'],
     ['BTC', 'coingecko', 'bitcoin'],
     ['ETH', 'coingecko', 'ethereum'],
+    ['USDC', 'coingecko', 'usd-coin'],
+    ['USDT', 'coingecko', 'tether'],
     // MET: Metronome? There are multiple "MET" tokens. We do NOT guess here;
     // the CoinGecko provider resolves it at runtime via /search and persists
     // the verified id. This row is a placeholder that gets corrected.
