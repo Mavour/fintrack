@@ -1,7 +1,11 @@
-/** Tiny sparkline from price_history points. */
+/** Tiny sparkline from price_history points (all-time; downsampled past 240). */
 export function sparkline(points: Array<{ price_idr: number }>, w = 110, h = 32): string {
-  if (points.length < 2) return `<span class="muted">—</span>`;
-  const vals = points.map((p) => p.price_idr);
+  let vals = points.map((p) => p.price_idr);
+  if (vals.length < 2) return `<span class="muted">—</span>`;
+  if (vals.length > 240) {
+    const step = vals.length / 240;
+    vals = Array.from({ length: 240 }, (_, i) => vals[Math.floor(i * step)]);
+  }
   const min = Math.min(...vals);
   const max = Math.max(...vals);
   const span = max - min || 1;

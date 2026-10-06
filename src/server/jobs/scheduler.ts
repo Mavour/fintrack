@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import type Database from 'better-sqlite3';
 import { refreshCrypto, refreshStocks, type OrchestratorOpts } from '../providers/priceOrchestrator.js';
 import { refreshLpPositions } from '../services/lpService.js';
+import { backfillThinHistories } from '../providers/historyBackfill.js';
 import { verifyMetMapping } from '../providers/coingecko.js';
 import { logger } from '../logger.js';
 
@@ -23,6 +24,12 @@ export function startScheduler(db: Database.Database, opts: OrchestratorOpts): v
     verifyMetMapping(db, opts.coingeckoApiKey).then((id) => {
       if (id) logger.info({ id }, 'MET mapping verified');
     });
+  });
+  // All-time chart backfill daily for assets with thin history.
+  cron.schedule('30 4 * * *', () => {
+    backfillThinHistories(db)
+      .then((r) => logger.info({ r }, 'history backfill done'))
+      .catch((e) => logger.error({ err: e }, 'backfill job failed'));
   });
   logger.info('scheduler started');
 }

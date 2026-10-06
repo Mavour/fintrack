@@ -19,16 +19,27 @@ export function storePrices(db: Database.Database, prices: Price[]): number {
       upsert.run(p.symbol, p.priceIdr, p.source);
       hist.run(p.symbol, p.priceIdr);
     }
-    // Keep history small: last 200 points per symbol.
-    db.prepare(
-      `DELETE FROM price_history WHERE rowid NOT IN (
-         SELECT rowid FROM price_history AS h2 WHERE h2.symbol = price_history.symbol
-         ORDER BY fetched_at DESC LIMIT 200)`,
-    ).run();
+    pruneHistory(db);
   });
   tx();
   logger.info({ count: prices.length }, 'prices stored');
   return prices.length;
+}
+
+/**
+ * Keep full resolution for the last 48h plus one point per day before that,
+ * so sparklines can show real all-time curves without unbounded growth.
+ */
+export function pruneHistory(db: Database.Database): void {
+  db.prepare(
+    `DELETE FROM price_history WHERE rowid NOT IN (
+       SELECT rowid FROM price_history WHERE fetched_at > datetime('now', '-48 hours')
+       UNION
+       SELECT MAX(rowid) FROM price_history
+       WHERE fetched_at <= datetime('now', '-48 hours')
+       GROUP BY symbol, date(fetched_at)
+     )`,
+  ).run();
 }
 
 export function getPrices(db: Database.Database, symbols?: string[]) {
@@ -40,7 +51,7 @@ export function getPrices(db: Database.Database, symbols?: string[]) {
   return db.prepare('SELECT * FROM price_cache ORDER BY symbol').all();
 }
 
-export function getHistory(db: Database.Database, symbol: string, limit = 30) {
+export function getHistory(db: Database.Database, symbol: string, limit = 500) {
   return db
     .prepare('SELECT price_idr, fetched_at FROM price_history WHERE symbol = ? ORDER BY fetched_at ASC LIMIT ?')
     .all(symbol, limit);

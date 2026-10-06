@@ -179,7 +179,7 @@ async function assetCards(assets: AssetV[]): Promise<string> {
     assets.map(async (a) => {
       let hist: Array<{ price_idr: number }> = [];
       try {
-        hist = (await api.get(`/api/prices/history?symbol=${a.symbol}`)) as typeof hist;
+        hist = (await api.get(`/api/prices/history?symbol=${a.symbol}&limit=500`)) as typeof hist;
       } catch { /* keep cache */ }
       const isCrypto = a.type === 'crypto';
       return `<div class="card asset-card" data-edit="${a.symbol}" tabindex="0" role="button" aria-label="Ubah ${a.symbol}">
@@ -207,7 +207,7 @@ async function bindRowEdit(el: HTMLElement): Promise<void> {
     cells.map(async (cell) => {
       const sym = (cell as HTMLElement).dataset.spark!;
       try {
-        const hist = (await api.get(`/api/prices/history?symbol=${sym}`)) as Array<{ price_idr: number }>;
+        const hist = (await api.get(`/api/prices/history?symbol=${sym}&limit=500`)) as Array<{ price_idr: number }>;
         cell.innerHTML = sparkline(hist);
       } catch {
         cell.innerHTML = '<span class="muted">—</span>';

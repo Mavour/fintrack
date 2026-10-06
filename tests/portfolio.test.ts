@@ -1,11 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { qtyTimesPriceIdr, plPercent, parseQty } from '../src/server/services/money.js';
+import { pruneHistory } from '../src/server/providers/priceStore.js';
+import { backfillSymbol } from '../src/server/providers/historyBackfill.js';
 import { diversificationScore, type AssetValuation, valuateAsset } from '../src/server/services/portfolioService.js';
 import { createFxRateProvider } from '../src/server/providers/fxRate.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('P/L + qty math (no float errors)', () => {
   it('qty as decimal string times price is exact', () => {
@@ -78,5 +84,44 @@ describe('FX conversion', () => {
     await expect(getRate()).resolves.toBe(16000);
     // crypto USD 100 * 16000 = Rp1.600.000
     expect(qtyTimesPriceIdr('1', 100 * 16000)).toBe(1_600_000);
+  });
+});
+
+describe('history all-time', () => {
+  function memDb() {
+    const d = new Database(':memory:');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    d.exec(fs.readFileSync(path.join(here, '..', 'src', 'server', 'db', 'schema.sql'), 'utf-8'));
+    return d;
+  }
+
+  it('prune keeps 48h full + daily skeleton', () => {
+    const db = memDb();
+    const ins = db.prepare(`INSERT INTO price_history (symbol, price_idr, fetched_at) VALUES ('X', 100, ?)`);
+    const now = Date.now();
+    // 3 points same old day -> keep latest only
+    ins.run(new Date(now - 5 * 86400000).toISOString().slice(0, 19).replace('T', ' '));
+    ins.run(new Date(now - 5 * 86400000 + 3600000).toISOString().slice(0, 19).replace('T', ' '));
+    // 2 recent points -> keep both
+    ins.run(new Date(now - 3600000).toISOString().slice(0, 19).replace('T', ' '));
+    ins.run(new Date(now - 60000).toISOString().slice(0, 19).replace('T', ' '));
+    pruneHistory(db);
+    const c = db.prepare(`SELECT COUNT(*) AS c FROM price_history`).get() as { c: number };
+    expect(c.c).toBe(3);
+    db.close();
+  });
+
+  it('backfill inserts coingecko daily history', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ prices: [[1700000000000, 100], [1700086400000, 110]] }),
+    })));
+    const db = memDb();
+    db.prepare(`INSERT INTO fx_cache (pair, rate) VALUES ('USDIDR', 16000)`).run();
+    db.prepare(`INSERT INTO assets (type, symbol, qty, avg_buy_price_idr) VALUES ('crypto','TST','1',0)`).run();
+    db.prepare(`INSERT INTO asset_map (symbol, provider, provider_id) VALUES ('TST','coingecko','test-coin')`).run();
+    const n = await backfillSymbol(db, 'TST');
+    expect(n).toBe(2);
+    db.close();
   });
 });
