@@ -52,6 +52,7 @@ export async function fetchEtherscanHoldings(
         qty: new Decimal(j.result).div(new Decimal(10).pow(18)).toString(),
         ref: null,
         decimals: 18,
+        mintSource: 'unknown',
       });
     }
   } catch {
@@ -87,6 +88,7 @@ export async function fetchEtherscanHoldings(
         qty,
         ref: t.contractAddress,
         decimals: dec,
+        mintSource: 'unknown',
       });
     } catch {
       // Skip unreadable contracts.

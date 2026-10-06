@@ -43,7 +43,7 @@ export async function fetchEvmHoldings(address: string, chain: string): Promise<
     const j = (await r.json()) as { status?: string; result?: string };
     if (j.result && j.result !== '0') {
       const units = new Decimal(j.result).div(new Decimal(10).pow(18)).toString();
-      out.push({ symbol: ex.native, name: ex.label + ' Native', qty: units, ref: null, decimals: 18 });
+      out.push({ symbol: ex.native, name: ex.label + ' Native', qty: units, ref: null, decimals: 18, mintSource: 'unknown' });
     }
   } catch {
     // Native lookup failed — continue with tokens.
@@ -60,7 +60,7 @@ export async function fetchEvmHoldings(address: string, chain: string): Promise<
     const dec = Number(t.decimals) || 18;
     const qty = new Decimal(t.balance).div(new Decimal(10).pow(dec)).toString();
     if (qty === '0') continue;
-    out.push({ symbol: t.symbol || '???', name: t.name || 'Token EVM', qty, ref: t.contractAddress, decimals: dec });
+    out.push({ symbol: (t.symbol || '???').toUpperCase(), name: t.name || 'Token EVM', qty, ref: t.contractAddress, decimals: dec, mintSource: 'unknown' });
     if (out.length >= 100) break;
   }
   return out;

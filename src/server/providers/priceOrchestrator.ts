@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3';
 import { CoinGeckoProvider } from './coingecko.js';
 import { BinanceProvider } from './binance.js';
 import { JupiterPriceProvider } from './jupiterPrice.js';
+import { DexScreenerPriceProvider } from './dexscreener.js';
+import { GeckoTerminalPriceProvider } from './geckoterminal.js';
 import { YahooFinanceProvider, isMarketOpen } from './yahooFinance.js';
 import { createFxRateProvider } from './fxRate.js';
 import { storePrices } from './priceStore.js';
@@ -38,6 +40,21 @@ export async function refreshCrypto(db: Database.Database, opts: OrchestratorOpt
       const jup = new JupiterPriceProvider(db, fx);
       const jp = await jup.fetch(stillMissing);
       storePrices(db, jp);
+      for (const p of jp) got.add(p.symbol);
+    }
+    // Long-tail Solana tokens (DexScreener pairs): last resort before cache.
+    const restMissing = symbols.filter((s) => !got.has(s));
+    if (restMissing.length > 0) {
+      const dex = new DexScreenerPriceProvider(db, fx);
+      const dp = await dex.fetch(restMissing);
+      storePrices(db, dp);
+      for (const p of dp) got.add(p.symbol);
+    }
+    // Dead/illiquid tokens that regain liquidity later (GeckoTerminal).
+    const finalMissing = symbols.filter((s) => !got.has(s));
+    if (finalMissing.length > 0) {
+      const gt = new GeckoTerminalPriceProvider(db, fx);
+      storePrices(db, await gt.fetch(finalMissing));
     }
   } catch (e) {
     logger.warn({ err: e }, 'crypto refresh failed, keeping cache');

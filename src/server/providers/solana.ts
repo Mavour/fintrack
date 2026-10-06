@@ -1,4 +1,6 @@
 import { fetchWithTimeout, withRetry } from './types.js';
+import { fetchDexTokens } from './dexscreener.js';
+import { fetchGeckoSymbols } from './geckoterminal.js';
 import { logger } from '../logger.js';
 
 export interface ChainHolding {
@@ -10,6 +12,8 @@ export interface ChainHolding {
   /** Token mint address (solana) or contract (evm). Null for native coin. */
   ref: string | null;
   decimals: number;
+  /** Where the symbol came from (for price-map registration). */
+  mintSource: 'native' | 'verified' | 'dex' | 'gecko' | 'unknown';
 }
 
 interface UltraHoldings {
@@ -65,8 +69,10 @@ export async function fetchSolanaHoldings(address: string): Promise<ChainHolding
 
   const out: ChainHolding[] = [];
   if (data.uiAmount > 0) {
-    out.push({ symbol: 'SOL', name: 'Solana', qty: data.uiAmountString, ref: null, decimals: 9 });
+    out.push({ symbol: 'SOL', name: 'Solana', qty: data.uiAmountString, ref: null, decimals: 9, mintSource: 'native' });
   }
+  const unknownMints: string[] = [];
+  const byMint = new Map<string, { total: number; decimals: number }>();
   for (const [mint, accounts] of Object.entries(data.tokens ?? {})) {
     let total = 0;
     let decimals = 0;
@@ -75,14 +81,31 @@ export async function fetchSolanaHoldings(address: string): Promise<ChainHolding
       decimals = a.decimals;
     }
     if (!(total > 0)) continue;
+    byMint.set(mint, { total, decimals });
+    if (!meta.get(mint)) unknownMints.push(mint);
+  }
+  // Resolve long-tail mints to real symbols via DexScreener (one batched call).
+  const dex = unknownMints.length > 0 ? await fetchDexTokens(unknownMints).catch(() => new Map()) : new Map();
+  const stillUnknown = unknownMints.filter((m) => !dex.has(m));
+  // Last resort for symbols: GeckoTerminal knows even dead tokens (price often null).
+  const gecko = stillUnknown.length > 0 ? await fetchGeckoSymbols(stillUnknown).catch(() => new Map()) : new Map();
+  for (const [mint, { total, decimals }] of byMint) {
     const m = meta.get(mint);
-    out.push({
-      symbol: m?.symbol ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`,
-      name: m?.name ?? 'Token Solana',
-      qty: String(total),
-      ref: mint,
-      decimals,
-    });
+    if (m) {
+      out.push({ symbol: m.symbol, name: m.name, qty: String(total), ref: mint, decimals, mintSource: 'verified' });
+    } else {
+      const d = (dex as Map<string, { symbol: string; name: string }>).get(mint);
+      const g = (gecko as Map<string, { symbol: string; name: string }>).get(mint);
+      const sym = d?.symbol ?? g?.symbol;
+      out.push({
+        symbol: sym ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`,
+        name: d?.name ?? g?.name ?? 'Token Solana',
+        qty: String(total),
+        ref: mint,
+        decimals,
+        mintSource: d ? 'dex' : g ? 'gecko' : 'unknown',
+      });
+    }
   }
   return out.slice(0, 100);
 }
