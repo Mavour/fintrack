@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Decimal } from 'decimal.js';
 import { fetchWithTimeout, withRetry } from '../providers/types.js';
 import { fetchSolanaHoldings, type ChainHolding } from '../providers/solana.js';
+import { fetchJupiterPnl } from '../providers/jupiterPositions.js';
 import { fetchEvmHoldings, EVM_CHAINS } from '../providers/evm.js';
 import { fetchEtherscanHoldings } from '../providers/etherscan.js';
 import { fetchDexTokens } from '../providers/dexscreener.js';
@@ -177,6 +178,16 @@ export async function importHoldings(
   const preview = await previewHoldings(db, parsed.chain, parsed.address, etherscanKey);
   const wanted = parsed.symbols?.map((s) => s.toUpperCase());
   const minUsd = parsed.min_usd ?? 1;
+  // True cost basis from Jupiter trade history (Solana). Takes precedence
+  // over estimates: it comes from actual swaps, not typing or snapshots.
+  let pnl = new Map<string, { avgCostUsd: number }>();
+  let fxRate: number | null = null;
+  if (parsed.chain === 'solana') {
+    pnl = await fetchJupiterPnl(parsed.address);
+    if ([...pnl.values()].some((p) => p.avgCostUsd > 0)) {
+      fxRate = await createFxRateProvider(db, 3_600_000)().catch(() => null);
+    }
+  }
   const skipped: Array<{ symbol: string; usd_value: number }> = [];
   const out: Array<{ symbol: string; qty: string }> = [];
   for (const h of preview) {
@@ -215,7 +226,14 @@ export async function importHoldings(
       }
     }
     const live = getAssetBySymbol(db, symbol);
-    const avg = live && live.avg_buy_price_idr > 0 ? live.avg_buy_price_idr : (h.price_idr ?? 0);
+    let avg = live && live.avg_buy_price_idr > 0 ? live.avg_buy_price_idr : (h.price_idr ?? 0);
+    // Jupiter trade-history cost wins over any estimate when available.
+    // Native SOL carries no mint ref, so use the wSOL mint for lookup.
+    const mint = h.ref ?? (h.symbol === 'SOL' ? 'So11111111111111111111111111111111111111112' : null);
+    const jup = mint ? pnl.get(mint) : undefined;
+    if (jup && jup.avgCostUsd > 0 && fxRate) {
+      avg = Math.max(1, Math.round(jup.avgCostUsd * fxRate));
+    }
     upsertAsset(db, {
       type: 'crypto',
       symbol,

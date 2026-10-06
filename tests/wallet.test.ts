@@ -175,6 +175,38 @@ describe('wallet sync', () => {
     db.close();
   });
 
+  it('jupiter trade cost wins over estimates', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const text = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+        if (String(url).includes('/ultra/v1/holdings/')) {
+          return text({
+            amount: '0', uiAmount: 0, uiAmountString: '0',
+            tokens: { MINTAAAA1111111111111111111111111111111111: [{ amount: '2000000', uiAmountString: '2', decimals: 6 }] },
+          });
+        }
+        if (String(url).includes('/tokens/v2/tag')) {
+          return text([{ id: 'MINTAAAA1111111111111111111111111111111111', symbol: 'TKNA', name: 'Token A' }]);
+        }
+        if (String(url).includes('/pnl-positions')) {
+          return text({ [SOL]: { tokenPositions: [{ assetId: 'MINTAAAA1111111111111111111111111111111111', averageCost: 5, unrealizedPnl: 10, unrealizedPnlPercentage: 100 }] } });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+    const db = memDb();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source) VALUES ('TKNA', 160000, 'manual')`).run();
+    // Existing manual estimate 100000 must be corrected by Jupiter $5 x 16000 = 80000.
+    db.prepare(`INSERT INTO assets (type, symbol, qty, avg_buy_price_idr) VALUES ('crypto','TKNA','1',100000)`).run();
+    await importHoldings(db, 'solana', SOL, ['TKNA']);
+    const row = db.prepare('SELECT avg_buy_price_idr FROM assets WHERE symbol = ?').get('TKNA') as {
+      avg_buy_price_idr: number;
+    };
+    expect(row.avg_buy_price_idr).toBe(80000);
+    db.close();
+  });
+
   it('parses LP positions with underlying values', () => {
     const out = parseLpPositions({
       fetcherResults: [

@@ -106,3 +106,41 @@ export function lpSymbol(platform: string, pool: string): string {
   const p = platform.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 7) || 'LP';
   return `LP-${p}-${pool.slice(0, 4).toUpperCase()}`;
 }
+
+export interface PnlEntry {
+  avgCostUsd: number;
+  unrealizedUsd: number;
+  unrealizedPct: number;
+}
+
+/**
+ * Per-token trade history (average cost + unrealized P/L) from Jupiter.
+ * This is the true cost basis — better than any manual estimate.
+ */
+export async function fetchJupiterPnl(address: string): Promise<Map<string, PnlEntry>> {
+  const out = new Map<string, PnlEntry>();
+  try {
+    const res = await withRetry(() =>
+      fetchWithTimeout(`https://datapi.jup.ag/v1/pnl-positions?address=${address}&filter=activePosition`, 15_000, {
+        headers: { 'x-api-key': PORTFOLIO_KEY, Accept: 'application/json', Referer: 'https://jup.ag/' },
+      }),
+    );
+    if (!res.ok) return out;
+    const json = (await res.json()) as Record<string, { tokenPositions?: Array<Record<string, number | string>> }>;
+    const positions = json[address]?.tokenPositions ?? [];
+    for (const t of positions) {
+      const mint = String(t.assetId ?? '');
+      const avg = Number(t.averageCost ?? 0);
+      if (mint && avg > 0) {
+        out.set(mint, {
+          avgCostUsd: avg,
+          unrealizedUsd: Number(t.unrealizedPnl ?? 0),
+          unrealizedPct: Number(t.unrealizedPnlPercentage ?? 0),
+        });
+      }
+    }
+  } catch {
+    // PnL unavailable — caller falls back to market/unknown.
+  }
+  return out;
+}
