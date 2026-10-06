@@ -85,15 +85,20 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
       </div>
     </div>`;
 
+  const spot = shown.filter((a) => !a.symbol.startsWith('LP-'));
+  const lps = shown.filter((a) => a.symbol.startsWith('LP-'));
+  const lpSection = (inner: string) =>
+    lps.length === 0 ? '' : `<div class="card"><strong>Posisi LP (DeFi)</strong><div style="margin-top:8px">${inner}</div></div>`;
+
   if (isDesktop()) {
     el.innerHTML = `<div class="grid12">
       <div class="span8">${summaryCard}${chips}</div>
       <div class="span4">${compDonut}</div>
-      <div class="span8"><div class="card"><strong>Daftar Aset</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(shown)}</div></div></div>
+      <div class="span8"><div class="card"><strong>Daftar Aset</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(spot)}</div></div>${lps.length ? `<div class="card" style="margin-top:20px"><strong>Posisi LP (DeFi)</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(lps)}</div></div>` : ''}</div>
       <div class="span4">${analysis}</div>
     </div>`;
   } else {
-    el.innerHTML = `${summaryCard}${chips}${compDonut}<div id="assets">${await assetCards(shown)}</div>${analysis}`;
+    el.innerHTML = `${summaryCard}${chips}${compDonut}<div id="assets">${await assetCards(spot)}</div>${lpSection(await assetCards(lps))}${analysis}`;
   }
 
   el.querySelectorAll('[data-f]').forEach(
@@ -281,6 +286,7 @@ async function openWalletSync(el: HTMLElement): Promise<void> {
       const fmtUsd = (v: number | null) =>
         v === null ? '<span class="muted">nilainya belum diketahui</span>' : `$${v.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
       list.innerHTML =
+        `<div class="eyebrow" style="margin:4px 0 2px">Token spot</div>` +
         data.holdings
           .map((h) => {
             const isDust = h.usd_value !== null && h.usd_value < minUsd;
@@ -289,16 +295,42 @@ async function openWalletSync(el: HTMLElement): Promise<void> {
             <span style="flex:1"><strong>${h.symbol}</strong><div class="muted">${h.name} • ${h.qty} • ${fmtUsd(h.usd_value)}${h.already_tracked ? ' • sudah dilacak' : ''}${isDust ? ' • debu, dilewati' : ''}</div></span>
             <strong>${h.price_idr != null ? formatIdr(h.price_idr) : '—'}</strong></label>`;
           })
-          .join('') + `<button class="btn-primary" id="w-import" style="margin-top:12px">Impor yang dipilih</button>`;
+          .join('');
+      // LP positions (Solana DeFi) in the same modal.
+      if (chain === 'solana') {
+        try {
+          const lp = (await api.get(`/api/wallets/lp-preview?address=${encodeURIComponent(address)}`)) as {
+            positions: Array<{ symbol: string; platform: string; label: string; totalUsd: number; already_tracked: boolean }>;
+          };
+          if (lp.positions.length > 0) {
+            list.innerHTML +=
+              `<div class="eyebrow" style="margin:12px 0 2px">Posisi LP (DeFi)</div>` +
+              lp.positions
+                .map(
+                  (p) => `<label class="row" style="gap:10px;padding:9px 0;border-bottom:1px solid var(--soft);cursor:pointer">
+                <input type="checkbox" data-lp="${p.symbol}" checked style="width:20px;height:20px;min-height:20px" />
+                <span style="flex:1"><strong>${p.symbol}</strong><div class="muted">${p.platform} ${p.label} • $${p.totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}${p.already_tracked ? ' • sudah dilacak' : ''}</div></span></label>`,
+                )
+                .join('');
+          }
+        } catch {
+          // LP unavailable — spot import still works.
+        }
+      }
+      list.innerHTML += `<button class="btn-primary" id="w-import" style="margin-top:12px">Impor yang dipilih</button>`;
       (list.querySelector('#w-import') as HTMLButtonElement).onclick = async () => {
         const symbols = [...list.querySelectorAll('input[data-sym]:checked')].map(
           (c) => (c as HTMLInputElement).dataset.sym!,
         );
-        if (symbols.length === 0) {
+        const lps = [...list.querySelectorAll('input[data-lp]:checked')].map(
+          (c) => (c as HTMLInputElement).dataset.lp!,
+        );
+        if (symbols.length === 0 && lps.length === 0) {
           alert('Pilih minimal satu token');
           return;
         }
-        await api.post('/api/wallets/import', { chain, address, symbols, min_usd: minUsd });
+        if (symbols.length > 0) await api.post('/api/wallets/import', { chain, address, symbols, min_usd: minUsd });
+        if (lps.length > 0) await api.post('/api/wallets/lp-import', { address, symbols: lps });
         close();
         renderPortfolio(el);
       };

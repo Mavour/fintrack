@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
 import { previewHoldings, importHoldings, PreviewQuerySchema, ImportBodySchema } from '../services/walletService.js';
+import { previewLp, importLp, LpPreviewQuery } from '../services/lpService.js';
 import { EVM_CHAINS } from '../providers/evm.js';
 import { getConfig } from '../config.js';
+import { z } from 'zod';
 
 const LABELS: Record<string, string> = {
   solana: 'Solana (Jupiter)',
@@ -52,6 +54,28 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       return reply.code(err.statusCode ?? 400).send({ error: err.message ?? 'Impor gagal' });
+    }
+  });
+
+  // LP positions (Solana DeFi via Jupiter Portfolio).
+  app.get('/api/wallets/lp-preview', async (req, reply) => {
+    try {
+      const q = LpPreviewQuery.parse((req as { query: unknown }).query);
+      return { positions: await previewLp(db, q.address) };
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      return reply.code(err.statusCode ?? 502).send({ error: err.message ?? 'Gagal memuat posisi LP' });
+    }
+  });
+
+  app.post('/api/wallets/lp-import', async (req, reply) => {
+    try {
+      const body = z.object({ address: LpPreviewQuery.shape.address, symbols: z.array(z.string()).optional() }).parse(req.body);
+      const imported = await importLp(db, body.address, body.symbols);
+      return { ok: true, imported, count: imported.length };
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      return reply.code(err.statusCode ?? 502).send({ error: err.message ?? 'Impor LP gagal' });
     }
   });
 }

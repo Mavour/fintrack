@@ -51,6 +51,9 @@ Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
 - Hanya alamat publik (watch-only). Qty mengikuti onchain; harga beli lama
   dipertahankan bila ada (kalau tidak, P/L disembunyikan). Token tak dikenal
   (tanpa simbol) dilewati otomatis.
+- **Posisi LP Solana** (Meteora dkk): terbaca dari Jupiter Portfolio di modal
+  yang sama, masuk sebagai aset `LP-*` (qty 1 @ nilai pool), diperbarui
+  otomatis tiap 5 menit. Butuh nilai ≥$1? Atur ambang di modal (debu dilewati).
 
 ## Catatan harga
 - `MET`: tidak ditebak — `verifyMetMapping()` memakai CoinGecko `/search`,

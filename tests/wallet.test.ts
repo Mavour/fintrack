@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { previewHoldings, importHoldings } from '../src/server/services/walletService.js';
 import { JupiterPriceProvider } from '../src/server/providers/jupiterPrice.js';
+import { parseLpPositions, lpSymbol } from '../src/server/providers/jupiterPositions.js';
 import { __resetTokenCache } from '../src/server/providers/solana.js';
 
 const SOL = '3keq3cRtYuoPCYBUL4s6N52ePguGivSZpNU4fzSiPXpd';
@@ -172,5 +173,36 @@ describe('wallet sync', () => {
     };
     expect(row.avg_buy_price_idr).toBe(16000); // first-seen market price, P/L tracks from sync
     db.close();
+  });
+
+  it('parses LP positions with underlying values', () => {
+    const out = parseLpPositions({
+      fetcherResults: [
+        {
+          elements: [
+            {
+              id: 'meteora-dlmm-X',
+              platformId: 'meteora',
+              type: 'liquidity',
+              label: 'LiquidityPool',
+              name: 'DLMM',
+              sourceRefs: [{ name: 'Pool', address: 'POOLADDR' }],
+              data: {
+                assets: [
+                  { data: { address: 'MINT1', amount: { raw: '1000000', decimals: 6 }, price: 2 }, value: 2 },
+                  { data: { address: 'MINT2', amount: { raw: '500000000', decimals: 9 }, price: 10 }, value: 5 },
+                ],
+                rewardAssets: [{ data: { address: 'MINT1', amount: { raw: '500000', decimals: 6 }, price: 2 }, value: 1 }],
+              },
+            },
+            { id: 'x', platformId: 'meteora', type: 'staked', label: 'S', name: 'N', data: {} },
+          ],
+        },
+      ],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].totalUsd).toBeCloseTo(8);
+    expect(out[0].assets[0].qty).toBe('1');
+    expect(lpSymbol('meteora', 'POOLADDR')).toBe('LP-METEORA-POOL');
   });
 });

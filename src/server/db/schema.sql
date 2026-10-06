@@ -81,6 +81,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
+-- Linked public wallets for LP auto-refresh (address only, never secrets).
+CREATE TABLE IF NOT EXISTS wallet_links (
+  chain TEXT NOT NULL,
+  address TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (chain, address)
+);
+
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
