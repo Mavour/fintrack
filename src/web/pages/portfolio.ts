@@ -6,6 +6,14 @@ import { openModal } from '../components/modal.js';
 import { isDesktop, isPrivat } from '../lib/state.js';
 
 let filter = 'Semua';
+
+function hideUnpriced(): boolean {
+  try {
+    return localStorage.getItem('fintrack-hide-unpriced') !== '0';
+  } catch {
+    return true;
+  }
+}
 const show = (n: number) => (isPrivat() ? '••••••' : formatIdr(n));
 
 interface AssetV {
@@ -48,6 +56,14 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
   };
   const counts = (t: string) => (t === 'Semua' ? data.assets.length : data.assets.filter((a) => a.type === t.toLowerCase()).length);
   const shown = data.assets.filter((a) => filter === 'Semua' || a.type === filter.toLowerCase());
+  // Unpriced tokens (no market anywhere, value $0) are hidden by default
+  // so they don't clutter the view. Toggle below reveals them.
+  const hiddenUnpriced = hideUnpriced()
+    ? shown.filter((a) => a.current_price_idr === null && (a.current_value_idr ?? 0) <= 0)
+    : [];
+  const visible = hideUnpriced()
+    ? shown.filter((a) => a.current_price_idr !== null || (a.current_value_idr ?? 0) > 0)
+    : shown;
   const byTypeVal = (t: string) => data.assets.filter((a) => a.type === t).reduce((s, a) => s + (a.current_value_idr ?? 0), 0);
   const tv = data.total_value_idr || 1;
   const riskRows: Array<[string, string, number, string]> = [
@@ -85,20 +101,34 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
       </div>
     </div>`;
 
-  const spot = shown.filter((a) => !a.symbol.startsWith('LP-'));
-  const lps = shown.filter((a) => a.symbol.startsWith('LP-'));
+  const spot = visible.filter((a) => !a.symbol.startsWith('LP-'));
+  const lps = visible.filter((a) => a.symbol.startsWith('LP-'));
   const lpSection = (inner: string) =>
     lps.length === 0 ? '' : `<div class="card"><strong>Posisi LP (DeFi)</strong><div style="margin-top:8px">${inner}</div></div>`;
+  const unpricedToggle =
+    hiddenUnpriced.length === 0
+      ? ''
+      : `<button class="chip" id="btn-unpriced" style="margin-top:4px">${hideUnpriced() ? `Tampilkan ${hiddenUnpriced.length} token tanpa harga` : 'Sembunyikan token tanpa harga'}</button>`;
 
   if (isDesktop()) {
     el.innerHTML = `<div class="grid12">
-      <div class="span8">${summaryCard}${chips}</div>
+      <div class="span8">${summaryCard}${chips}${unpricedToggle}</div>
       <div class="span4">${compDonut}</div>
       <div class="span8"><div class="card"><strong>Daftar Aset</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(spot)}</div></div>${lps.length ? `<div class="card" style="margin-top:20px"><strong>Posisi LP (DeFi)</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(lps)}</div></div>` : ''}</div>
       <div class="span4">${analysis}</div>
     </div>`;
   } else {
-    el.innerHTML = `${summaryCard}${chips}${compDonut}<div id="assets">${await assetCards(spot)}</div>${lpSection(await assetCards(lps))}${analysis}`;
+    el.innerHTML = `${summaryCard}${chips}${unpricedToggle}${compDonut}<div id="assets">${await assetCards(spot)}</div>${lpSection(await assetCards(lps))}${analysis}`;
+  }
+
+  const unpricedBtn = document.getElementById('btn-unpriced');
+  if (unpricedBtn) {
+    unpricedBtn.onclick = () => {
+      try {
+        localStorage.setItem('fintrack-hide-unpriced', hideUnpriced() ? '0' : '1');
+      } catch { /* ignore */ }
+      renderPortfolio(el);
+    };
   }
 
   el.querySelectorAll('[data-f]').forEach(
