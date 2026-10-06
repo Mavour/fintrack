@@ -32,6 +32,11 @@ interface JupToken {
 /** Verified-token list cached 24h (3873 tokens, one fetch per day). */
 let tokenCache: { at: number; byMint: Map<string, JupToken> } | null = null;
 
+/** Test-only: clear the module-level token cache. */
+export function __resetTokenCache(): void {
+  tokenCache = null;
+}
+
 async function tokenMap(): Promise<Map<string, JupToken>> {
   if (tokenCache && Date.now() - tokenCache.at < 24 * 3600 * 1000) return tokenCache.byMint;
   const res = await withRetry(() => fetchWithTimeout('https://api.jup.ag/tokens/v2/tag?query=verified', 15_000));

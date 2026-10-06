@@ -242,6 +242,7 @@ async function openWalletSync(el: HTMLElement): Promise<void> {
     <label for="w-chain">Jaringan</label><select id="w-chain">${chains.map((c) => `<option value="${c.id}" ${c.id === lastChain ? 'selected' : ''}>${c.label}${c.needs_key ? ' (butuh API key)' : ''}</option>`).join('')}</select>
     <div class="muted" id="w-keyhint" style="margin-top:4px"></div>
     <label for="w-addr">Alamat wallet</label><input id="w-addr" value="${lastAddr}" placeholder="cth. 3keq…Xpd" autocomplete="off" />
+    <label for="w-min">Minimal nilai (USD) — di bawah ini dilewati otomatis</label><input id="w-min" type="number" min="0" value="1" inputmode="decimal" />
     <button class="btn-primary" id="w-preview">Lihat Pratinjau</button>
     <div id="w-list" style="margin-top:12px"></div>`,
   );
@@ -268,7 +269,7 @@ async function openWalletSync(el: HTMLElement): Promise<void> {
     btn.textContent = 'Memuat…';
     try {
       const data = (await api.get(`/api/wallets/preview?chain=${chain}&address=${encodeURIComponent(address)}`)) as {
-        holdings: Array<{ symbol: string; name: string; qty: string; price_idr: number | null; already_tracked: boolean }>;
+        holdings: Array<{ symbol: string; name: string; qty: string; price_idr: number | null; usd_value: number | null; already_tracked: boolean }>;
       };
       localStorage.setItem('fintrack-wallet-chain', chain);
       localStorage.setItem('fintrack-wallet-addr', address);
@@ -276,14 +277,18 @@ async function openWalletSync(el: HTMLElement): Promise<void> {
         list.innerHTML = '<div class="empty">Tidak ada token bersistaldo di alamat ini.</div>';
         return;
       }
+      const minUsd = Number((body.querySelector('#w-min') as HTMLInputElement).value || 0);
+      const fmtUsd = (v: number | null) =>
+        v === null ? '<span class="muted">nilainya belum diketahui</span>' : `$${v.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
       list.innerHTML =
         data.holdings
-          .map(
-            (h) => `<label class="row" style="gap:10px;padding:9px 0;border-bottom:1px solid var(--soft);cursor:pointer">
-            <input type="checkbox" data-sym="${h.symbol}" checked style="width:20px;height:20px;min-height:20px" />
-            <span style="flex:1"><strong>${h.symbol}</strong><div class="muted">${h.name} • ${h.qty}${h.already_tracked ? ' • sudah dilacak' : ''}</div></span>
-            <strong>${h.price_idr != null ? formatIdr(h.price_idr) : '—'}</strong></label>`,
-          )
+          .map((h) => {
+            const isDust = h.usd_value !== null && h.usd_value < minUsd;
+            return `<label class="row" style="gap:10px;padding:9px 0;border-bottom:1px solid var(--soft);cursor:pointer;${isDust ? 'opacity:.55' : ''}">
+            <input type="checkbox" data-sym="${h.symbol}" ${isDust ? '' : 'checked'} style="width:20px;height:20px;min-height:20px" />
+            <span style="flex:1"><strong>${h.symbol}</strong><div class="muted">${h.name} • ${h.qty} • ${fmtUsd(h.usd_value)}${h.already_tracked ? ' • sudah dilacak' : ''}${isDust ? ' • debu, dilewati' : ''}</div></span>
+            <strong>${h.price_idr != null ? formatIdr(h.price_idr) : '—'}</strong></label>`;
+          })
           .join('') + `<button class="btn-primary" id="w-import" style="margin-top:12px">Impor yang dipilih</button>`;
       (list.querySelector('#w-import') as HTMLButtonElement).onclick = async () => {
         const symbols = [...list.querySelectorAll('input[data-sym]:checked')].map(
@@ -293,7 +298,7 @@ async function openWalletSync(el: HTMLElement): Promise<void> {
           alert('Pilih minimal satu token');
           return;
         }
-        await api.post('/api/wallets/import', { chain, address, symbols });
+        await api.post('/api/wallets/import', { chain, address, symbols, min_usd: minUsd });
         close();
         renderPortfolio(el);
       };

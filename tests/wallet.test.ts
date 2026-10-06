@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { previewHoldings, importHoldings } from '../src/server/services/walletService.js';
 import { JupiterPriceProvider } from '../src/server/providers/jupiterPrice.js';
+import { __resetTokenCache } from '../src/server/providers/solana.js';
 
 const SOL = '3keq3cRtYuoPCYBUL4s6N52ePguGivSZpNU4fzSiPXpd';
 
@@ -12,6 +13,7 @@ function memDb(): Database.Database {
   const db = new Database(':memory:');
   const here = path.dirname(fileURLToPath(import.meta.url));
   db.exec(fs.readFileSync(path.join(here, '..', 'src', 'server', 'db', 'schema.sql'), 'utf-8'));
+  db.prepare(`INSERT INTO fx_cache (pair, rate, fetched_at) VALUES ('USDIDR', 16000, datetime('now'))`).run();
   return db;
 }
 
@@ -47,6 +49,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+beforeEach(() => {
+  __resetTokenCache();
+});
+
 describe('wallet sync', () => {
   it('rejects invalid addresses', async () => {
     const db = memDb();
@@ -71,7 +77,7 @@ describe('wallet sync', () => {
     const db = memDb();
     db.prepare(`INSERT INTO assets (type, symbol, qty, avg_buy_price_idr) VALUES ('crypto','USDC','1',15000)`).run();
     db.prepare(`INSERT INTO price_cache (symbol, price_idr, source) VALUES ('USDC', 16000, 'manual')`).run();
-    const imported = await importHoldings(db, 'solana', SOL);
+    const { imported } = await importHoldings(db, 'solana', SOL);
     expect(imported.find((i) => i.symbol === 'USDC')?.qty).toBe('5');
     const row = db.prepare('SELECT qty, avg_buy_price_idr FROM assets WHERE symbol = ?').get('USDC') as {
       qty: string;
@@ -98,7 +104,7 @@ describe('wallet sync', () => {
 
   it('jupiter provider prices mints by CoinGecko-free path', async () => {
     const db = memDb();
-    db.prepare(`INSERT INTO fx_cache (pair, rate) VALUES ('USDIDR', 16000)`).run();
+    db.prepare(`INSERT OR IGNORE INTO fx_cache (pair, rate) VALUES ('USDIDR', 16000)`).run();
     db.prepare(`INSERT INTO asset_map (symbol, provider, provider_id) VALUES ('WIF','jupiter','EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm')`).run();
     vi.stubGlobal(
       'fetch',
@@ -113,6 +119,46 @@ describe('wallet sync', () => {
     expect(out).toHaveLength(1);
     expect(out[0].priceIdr).toBe(24000);
     expect(out[0].source).toBe('jupiter');
+    db.close();
+  });
+
+  it('dust below $1 is skipped on import', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const text = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+        if (String(url).includes('/ultra/v1/holdings/')) {
+          return text({
+            amount: '0',
+            uiAmount: 0,
+            uiAmountString: '0',
+            tokens: {
+              BIGMINT1111111111111111111111111111111111: [{ amount: '10000000', uiAmountString: '10', decimals: 6 }],
+              DUSTMINT2222222222222222222222222222222222: [{ amount: '1', uiAmountString: '0.000001', decimals: 6 }],
+            },
+          });
+        }
+        if (String(url).includes('/tokens/v2/tag')) {
+          return text([
+            { id: 'BIGMINT1111111111111111111111111111111111', symbol: 'BIG', name: 'Big Token' },
+            { id: 'DUSTMINT2222222222222222222222222222222222', symbol: 'DUST', name: 'Dust Token' },
+          ]);
+        }
+        if (String(url).includes('/price/v3')) {
+          return text({
+            BIGMINT1111111111111111111111111111111111: { usdPrice: 10 },
+            DUSTMINT2222222222222222222222222222222222: { usdPrice: 0.01 },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+    const db = memDb();
+    const { imported, skipped_dust } = await importHoldings(db, 'solana', SOL);
+    expect(imported.map((i) => i.symbol)).toContain('BIG'); // $100 kept
+    expect(imported.map((i) => i.symbol)).not.toContain('DUST'); // ~$0 dropped
+    expect(skipped_dust.map((s) => s.symbol)).toContain('DUST');
+    expect(db.prepare('SELECT COUNT(*) AS c FROM assets WHERE symbol = ?').get('DUST') as { c: number }).toEqual({ c: 0 });
     db.close();
   });
 

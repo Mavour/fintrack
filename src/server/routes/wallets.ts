@@ -41,8 +41,14 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
   app.post('/api/wallets/import', async (req, reply) => {
     try {
       const body = ImportBodySchema.parse(req.body);
-      const imported = await importHoldings(db, body.chain, body.address, body.symbols, getConfig().etherscanApiKey);
-      return { ok: true, imported, count: imported.length };
+      const { imported, skipped_dust } = await importHoldings(
+        db,
+        body.chain,
+        body.address,
+        body.symbols,
+        getConfig().etherscanApiKey,
+      );
+      return { ok: true, imported, skipped_dust, count: imported.length };
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       return reply.code(err.statusCode ?? 400).send({ error: err.message ?? 'Impor gagal' });
