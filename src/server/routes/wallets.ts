@@ -71,8 +71,8 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
   app.post('/api/wallets/lp-import', async (req, reply) => {
     try {
       const body = z.object({ address: LpPreviewQuery.shape.address, symbols: z.array(z.string()).optional() }).parse(req.body);
-      const imported = await importLp(db, body.address, body.symbols);
-      return { ok: true, imported, count: imported.length };
+      const { imported, removed } = await importLp(db, body.address, body.symbols);
+      return { ok: true, imported, removed, count: imported.length };
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       return reply.code(err.statusCode ?? 502).send({ error: err.message ?? 'Impor LP gagal' });

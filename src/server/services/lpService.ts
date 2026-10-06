@@ -31,7 +31,7 @@ export async function importLp(
   db: Database.Database,
   address: string,
   symbols?: string[],
-): Promise<Array<{ symbol: string; value_usd: number }>> {
+): Promise<{ imported: Array<{ symbol: string; value_usd: number }>; removed: string[] }> {
   const list = await previewLp(db, address);
   const wanted = symbols?.map((s) => s.toUpperCase());
   const fx = createFxRateProvider(db, 3_600_000);
@@ -45,13 +45,18 @@ export async function importLp(
   atomic();
   for (const p of list) {
     if (wanted && !wanted.includes(p.symbol)) continue;
-    // LP tracked as ONE asset: qty 1 @ pool value (avg unknown -> P/L hidden).
+    // LP tracked as ONE asset: qty 1 @ pool value. Avg = value at import,
+    // so P/L means "since tracked" (entry price is unknowable onchain).
+    const priceIdr = Math.max(1, Math.round(p.totalUsd * rate));
+    const live = (db.prepare('SELECT avg_buy_price_idr FROM assets WHERE symbol = ?').get(p.symbol) ?? {}) as {
+      avg_buy_price_idr?: number;
+    };
     upsertAsset(db, {
       type: 'crypto',
       symbol: p.symbol,
       name: `${p.platform} ${p.label}`,
       qty: '1',
-      avg_buy_price_idr: 0,
+      avg_buy_price_idr: live.avg_buy_price_idr && live.avg_buy_price_idr > 0 ? live.avg_buy_price_idr : priceIdr,
     });
     db.prepare(
       `INSERT INTO asset_map (symbol, provider, provider_id, updated_at)
@@ -61,7 +66,29 @@ export async function importLp(
     storePrices(db, [{ symbol: p.symbol, priceIdr: Math.max(1, Math.round(p.totalUsd * rate)), source: 'jupiter-lp' }]);
     out.push({ symbol: p.symbol, value_usd: p.totalUsd });
   }
-  return out;
+  // Drop tracked LP whose pool vanished AND whose price is stale (>30 min):
+  // the position was closed (funds left the pool), so a frozen value + P/L
+  // would lie. A merely hiccuping API can't go stale (scheduler refreshes 5-minutely).
+  const livePools = new Set(list.map((p) => p.pool));
+  const tracked = db.prepare(`SELECT symbol, provider_id FROM asset_map WHERE provider = 'jupiter-lp'`).all() as Array<{
+    symbol: string;
+    provider_id: string;
+  }>;
+  const removed: string[] = [];
+  for (const r of tracked) {
+    if (livePools.has(r.provider_id)) continue;
+    const pc = db.prepare('SELECT fetched_at FROM price_cache WHERE symbol = ?').get(r.symbol) as
+      | { fetched_at: string }
+      | undefined;
+    const ageMs = pc ? Date.now() - new Date(pc.fetched_at + 'Z').getTime() : Infinity;
+    if (ageMs > 30 * 60 * 1000) {
+      db.prepare('DELETE FROM assets WHERE symbol = ?').run(r.symbol);
+      db.prepare('DELETE FROM asset_map WHERE symbol = ?').run(r.symbol);
+      db.prepare('DELETE FROM price_cache WHERE symbol = ?').run(r.symbol);
+      removed.push(r.symbol);
+    }
+  }
+  return { imported: out, removed };
 }
 
 /** Refresh LP values for all linked wallets (scheduler, every 5 min). */
@@ -72,10 +99,14 @@ export async function refreshLpPositions(db: Database.Database): Promise<void> {
   if (links.length === 0) return;
   const fx = createFxRateProvider(db, 3_600_000);
   const rate = await fx().catch(() => 16000);
+  const seenPools = new Set<string>();
+  let ok = false;
   for (const { address } of links) {
     try {
       const positions = await fetchJupiterLp(address);
+      ok = true;
       const byPool = new Map(positions.map((p) => [p.pool, p]));
+      for (const pool of byPool.keys()) seenPools.add(pool);
       const rows = db.prepare(`SELECT symbol, provider_id FROM asset_map WHERE provider = 'jupiter-lp'`).all() as Array<{
         symbol: string;
         provider_id: string;
@@ -92,5 +123,26 @@ export async function refreshLpPositions(db: Database.Database): Promise<void> {
       logger.warn({ err: e, address: address.slice(0, 6) }, 'LP refresh failed, keeping cache');
     }
     await new Promise((r) => setTimeout(r, 1000));
+  }
+  // Prune closed positions: pool absent from a successful fetch AND price
+  // older than 6h. The long grace period tolerates API hiccups.
+  if (ok) {
+    const rows = db.prepare(`SELECT symbol, provider_id FROM asset_map WHERE provider = 'jupiter-lp'`).all() as Array<{
+      symbol: string;
+      provider_id: string;
+    }>;
+    for (const r of rows) {
+      if (seenPools.has(r.provider_id)) continue;
+      const pc = db.prepare('SELECT fetched_at FROM price_cache WHERE symbol = ?').get(r.symbol) as
+        | { fetched_at: string }
+        | undefined;
+      const ageMs = pc ? Date.now() - new Date(pc.fetched_at + 'Z').getTime() : Infinity;
+      if (ageMs > 6 * 3600 * 1000) {
+        db.prepare('DELETE FROM assets WHERE symbol = ?').run(r.symbol);
+        db.prepare('DELETE FROM asset_map WHERE symbol = ?').run(r.symbol);
+        db.prepare('DELETE FROM price_cache WHERE symbol = ?').run(r.symbol);
+        logger.info({ symbol: r.symbol }, 'closed LP position pruned');
+      }
+    }
   }
 }

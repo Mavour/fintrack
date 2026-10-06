@@ -114,7 +114,7 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
     el.innerHTML = `<div class="grid12">
       <div class="span8">${summaryCard}${chips}${unpricedToggle}</div>
       <div class="span4">${compDonut}</div>
-      <div class="span8"><div class="card"><strong>Daftar Aset</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(spot)}</div></div>${lps.length ? `<div class="card" style="margin-top:20px"><strong>Posisi LP (DeFi)</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(lps)}</div></div>` : ''}</div>
+      <div class="span8"><div class="card"><strong>Daftar Aset</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(spot)}</div></div>${lps.length ? `<div class="card" style="margin-top:20px"><strong>Posisi LP (DeFi)</strong><div class="tbl-wrap" style="margin-top:8px">${assetTable(lps, false)}</div></div>` : ''}</div>
       <div class="span4">${analysis}</div>
     </div>`;
   } else {
@@ -152,12 +152,12 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
   if (isDesktop()) bindRowEdit(el);
 }
 
-function assetTable(assets: AssetV[]): string {
+function assetTable(assets: AssetV[], withTrend = true): string {
   if (assets.length === 0) return '<div class="empty">Belum ada aset pada filter ini.</div>';
   const tv = assets.reduce((s, a) => s + (a.current_value_idr ?? 0), 0) || 1;
   return `<table class="data"><thead><tr>
     <th>Aset</th><th>Jenis</th><th style="text-align:right">Qty</th><th style="text-align:right">Harga</th>
-    <th style="text-align:right">Nilai</th><th style="text-align:right">P/L %</th><th style="text-align:right">Bobot %</th><th>Tren 7h</th>
+    <th style="text-align:right">Nilai</th><th style="text-align:right">P/L %</th><th style="text-align:right">Bobot %</th>${withTrend ? '<th>Tren 7h</th>' : ''}
   </tr></thead><tbody>${assets
     .map(
       (a) => `<tr class="clickable" data-edit="${a.symbol}" tabindex="0">
@@ -168,7 +168,7 @@ function assetTable(assets: AssetV[]): string {
       <td style="text-align:right"><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong>${a.type === 'crypto' && a.current_value_usd != null ? `<div class="muted">${formatUsd(a.current_value_usd)}</div>` : ''}</td>
       <td style="text-align:right" class="${(a.pl_percent ?? 0) >= 0 ? 'pos' : 'neg'}">${plBlock(a)}</td>
       <td style="text-align:right">${(((a.current_value_idr ?? 0) / tv) * 100).toFixed(1)}%</td>
-      <td>${a.symbol.startsWith('LP-') ? '<span class="muted">—</span>' : `<span data-sparkwrap="${a.symbol}"><span class="muted">…</span></span>`}</td></tr>`,
+      ${withTrend ? `<td><span data-sparkwrap="${a.symbol}"><span class="muted">…</span></span></td>` : ''}</tr>`,
     )
     .join('')}</tbody></table>`;
 }
@@ -192,7 +192,7 @@ async function assetCards(assets: AssetV[]): Promise<string> {
           <div class="grow"><strong>${a.symbol}</strong> <span class="type-chip">${a.type}</span>
             <div class="muted">${a.qty} × ${a.current_price_idr != null ? show(a.current_price_idr) : '—'}${usdNote(a.current_price_usd, isCrypto)}</div>
           </div>
-          <div style="flex:none">${isLp ? '<span class="muted">—</span>' : sparkline(hist, 84, 30)}</div>
+          <div style="flex:none">${isLp ? '' : sparkline(hist, 84, 30)}</div>
         </div>
         <div class="asset-stats">
           <div><span class="eyebrow">Nilai</span><strong>${a.current_value_idr != null ? show(a.current_value_idr) : '—'}</strong>${usdNote(a.current_value_usd, isCrypto)}</div>

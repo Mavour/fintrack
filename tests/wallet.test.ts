@@ -237,4 +237,51 @@ describe('wallet sync', () => {
     expect(out[0].assets[0].qty).toBe('1');
     expect(lpSymbol('meteora', 'POOLADDR')).toBe('LP-METEORA-POOL');
   });
+
+  it('lp import sets avg to pool value so P/L tracks since sync', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/portfolio/v2/positions/')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              fetcherResults: [
+                {
+                  elements: [
+                    {
+                      id: 'meteora-dlmm-X',
+                      platformId: 'meteora',
+                      type: 'liquidity',
+                      label: 'LiquidityPool',
+                      name: 'DLMM',
+                      sourceRefs: [{ name: 'Pool', address: 'POOLADDR' }],
+                      data: {
+                        assets: [{ data: { address: 'M', amount: { raw: '1000000', decimals: 6 }, price: 70 }, value: 70 }],
+                        rewardAssets: [],
+                      },
+                    },
+                  ],
+                },
+              ],
+            }),
+          };
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+    const db = memDb();
+    const { importLp } = await import('../src/server/services/lpService.js');
+    const { imported, removed } = await importLp(db, SOL);
+    expect(imported).toHaveLength(1);
+    expect(removed).toEqual([]);
+    const row = db.prepare('SELECT qty, avg_buy_price_idr FROM assets WHERE symbol = ?').get(imported[0].symbol) as {
+      qty: string;
+      avg_buy_price_idr: number;
+    };
+    expect(row.qty).toBe('1');
+    expect(row.avg_buy_price_idr).toBeGreaterThan(0);
+    db.close();
+  });
 });
