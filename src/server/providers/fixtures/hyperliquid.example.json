@@ -1,0 +1,24 @@
+{
+  "_note": "Fixture Hyperliquid info API resmi (disamarkan). POST https://api.hyperliquid.xyz/info. Docs: hyperliquid.gitbook.io → API → info endpoint → spot. entryNtl sengaja diabaikan adapter (P/L hanya dari cost_basis).",
+  "spotClearinghouseState": {
+    "balances": [
+      { "coin": "HYPE", "token": 150, "hold": "0.0", "total": "25.5", "entryNtl": "0.0" },
+      { "coin": "USDC", "token": 0, "hold": "0.0", "total": "140.25", "entryNtl": "0.0" },
+      { "coin": "XYZ", "token": 99, "hold": "0", "total": "0", "entryNtl": "0.0" }
+    ]
+  },
+  "spotMetaAndAssetCtxs": [
+    {
+      "tokens": [
+        { "name": "USDC", "szDecimals": 8, "weiDecimals": 8, "index": 0, "tokenId": "0x6d1e7cde53ba9467b783cb7c530ce054", "isCanonical": true },
+        { "name": "HYPE", "szDecimals": 2, "weiDecimals": 8, "index": 150, "tokenId": "0x2222222222222222222222222222222222222222", "isCanonical": true }
+      ],
+      "universe": [
+        { "name": "HYPE/USDC", "tokens": [150, 0], "index": 0, "isCanonical": true }
+      ]
+    },
+    [
+      { "dayNtlVlm": "8906.0", "markPx": "20.1", "midPx": "20.12", "prevDayPx": "19.8" }
+    ]
+  ]
+}

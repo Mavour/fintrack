@@ -1,6 +1,11 @@
 /* Seed dummy data + verify every feature end-to-end via the live API.
- * Run: node scripts/seed-dummy.mjs (server must be up; first-run open mode).
+ * Run: DEMO_MODE=true node scripts/seed-dummy.mjs (server must be up; first-run open mode).
+ * Refuses to run unless DEMO_MODE=true so demo data never lands in a real DB.
  * Exits non-zero on any failed check. Uses delta assertions so existing data is safe. */
+if (process.env.DEMO_MODE !== 'true') {
+  console.error('REFUSED: set DEMO_MODE=true to seed demo data (default false, protects real DBs).');
+  process.exit(2);
+}
 const BASE = process.env.SEED_BASE ?? 'http://127.0.0.1:3000';
 
 let pass = 0;
@@ -174,6 +179,14 @@ for (const [sym, [baseV, step]] of Object.entries(bases)) {
   }
 }
 db.close();
+// Tandai simbol demo agar bisa dibersihkan tanpa menyentuh data user.
+{
+  const { default: Database2 } = await import('better-sqlite3');
+  const db2 = new Database2(dbPath);
+  db2.prepare(`INSERT INTO meta (key, value) VALUES ('demo_seed', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+    .run(JSON.stringify({ symbols: dummyAssets.map((a) => a.symbol), at: new Date().toISOString() }));
+  db2.close();
+}
 for (const s of ['SOL', 'BBCA.JK', 'RDNPU']) {
   const h = await api(`/api/prices/history?symbol=${s}`);
   check(`prices: history ${s} >= 7 points`, h.body.length >= 7, `got ${h.body.length}`);

@@ -1,0 +1,10 @@
+{
+  "_note": "Fixture Jupiter Portfolio API v1 (disamarkan). Bentuk asli: GET https://api.jup.ag/portfolio/v1/positions/{address}. Diverifikasi dari docs https://dev.jup.ag/docs/portfolio (beta, cakupan platform Jupiter — cek GET /platforms untuk daftar pasti).",
+  "positions": [
+    { "mint": "So1111111111111111111111111111111111111111X", "symbol": "SOL", "name": "Solana", "uiAmount": 1.5, "priceUsd": 150.0, "valueUsd": 225.0 },
+    { "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDtX", "symbol": "USDC", "name": "USD Coin", "uiAmount": 42.0, "priceUsd": 1.0, "valueUsd": 42.0 }
+  ],
+  "staking": [
+    { "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsD4X", "symbol": "JUP", "name": "Jupiter Staked", "uiAmount": 10.0, "priceUsd": 0.5, "valueUsd": 5.0 }
+  ]
+}

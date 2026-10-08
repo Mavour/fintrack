@@ -14,12 +14,19 @@ import { registerPortfolioRoutes } from './routes/portfolio.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerWalletRoutes } from './routes/wallets.js';
 import { registerAuthRoutes, ensurePassword, isSessionValid, getPasswordHash } from './routes/auth.js';
+import { registerEventRoutes } from './routes/events.js';
 import { startScheduler } from './jobs/scheduler.js';
+import { seedWallets } from './services/walletRegistry.js';
 
 export async function buildApp() {
   const config = getConfig();
   const db = getDatabase(config.databasePath);
   await ensurePassword(db, config.appPassword);
+  try {
+    seedWallets(db, config.seedWallets);
+  } catch {
+    // Seeding is best-effort; registry CRUD remains available.
+  }
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   await app.register(cookie, { secret: config.sessionSecret });
@@ -46,6 +53,7 @@ export async function buildApp() {
   registerPortfolioRoutes(app, db);
   registerDashboardRoutes(app, db);
   registerWalletRoutes(app, db);
+  registerEventRoutes(app);
   // Serve built frontend if present.
   const publicDir = path.resolve('dist/public');
   if (fs.existsSync(publicDir)) {

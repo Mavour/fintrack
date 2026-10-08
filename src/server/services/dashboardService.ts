@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { listValuations } from './portfolioService.js';
+import { getUnifiedPortfolio } from './portfolioService.js';
 
 export interface DashboardSummary {
   total_cash_idr: number;
@@ -27,17 +27,17 @@ export function getDashboard(db: Database.Database, month?: string): DashboardSu
   const income = flowRows.find((r) => r.kind === 'income')?.t ?? 0;
   const expense = flowRows.find((r) => r.kind === 'expense')?.t ?? 0;
 
-  const valuations = listValuations(db);
-  let invested = 0;
-  let pl = 0;
-  const byType = new Map<string, number>();
+  const uni = getUnifiedPortfolio(db);
+  const invested = uni.total_value_idr;
+  const pl = uni.floating_pl_idr;
+  const byType = new Map<string, number>(Object.entries(uni.by_type));
   const byAsset: Array<{ symbol: string; value_idr: number }> = [];
-  for (const v of valuations) {
+  for (const v of uni.assets) {
     const val = v.current_value_idr ?? 0;
-    invested += val;
-    if (v.pl_idr !== null) pl += v.pl_idr;
-    byType.set(v.type, (byType.get(v.type) ?? 0) + val);
     if (val > 0) byAsset.push({ symbol: v.symbol, value_idr: val });
+  }
+  for (const w of uni.wallet_tokens) {
+    if ((w.value_idr ?? 0) > 0) byAsset.push({ symbol: w.symbol, value_idr: w.value_idr ?? 0 });
   }
 
   const allocation = [

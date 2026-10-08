@@ -1,4 +1,9 @@
-/* Verification screenshots: 390 / 768 / 1440 x 4 pages + layout assertions. */
+/* Verification screenshots: 390 / 768 / 1440 x 4 pages + layout assertions.
+ * Demo data goes to a TEMP db only. Refuses to run unless DEMO_MODE=true. */
+if (process.env.DEMO_MODE !== 'true') {
+  console.error('REFUSED: set DEMO_MODE=true to run screenshot seeding (default false, protects real DBs).');
+  process.exit(2);
+}
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,7 +22,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const server = spawn('node', ['dist/server/index.js'], {
   cwd: new URL('../', import.meta.url).pathname.replace(/^\//, ''),
-  env: { ...process.env, PORT: String(PORT), DATABASE_PATH: DB, APP_PASSWORD: '' },
+  env: { ...process.env, PORT: String(PORT), DATABASE_PATH: DB, APP_PASSWORD: '', NODE_ENV: 'production', LOG_LEVEL: 'warn' },
   stdio: 'pipe',
 });
 server.stdout.on('data', (d) => process.stdout.write(`[srv] ${d}`));

@@ -126,6 +126,54 @@ input::placeholder { color: var(--muted); }
   background: var(--soft); color: var(--dark); text-transform: capitalize;
 }
 
+/* ---------- chain badge / wallet chip / LP ---------- */
+.chain-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}.chain-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.wallet-chip {
+  display: inline-flex; align-items: center;
+  height: 22px; padding: 0 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: var(--soft); color: var(--muted); border: 1px solid var(--border);
+}
+.range-chip {
+  display: inline-flex; align-items: center;
+  height: 22px; padding: 0 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.range-chip.in { background: #e7f7ef; color: var(--primary-dark); }
+.range-chip.out { background: #fdecec; color: var(--red); }
+.lp-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.lp-nums .eyebrow { display: block; margin-bottom: 2px; }
+.subtabs { display: flex; gap: 8px; margin: 12px 0 4px; }
+.copy-btn { min-height: 32px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
+
+/* ---------- badge popover (status sinkron per tingkat) ---------- */
+.badge-pop { position: relative; display: inline-block; }
+.badge-pop summary { list-style: none; cursor: pointer; display: inline-block; }
+.badge-pop summary::-webkit-details-marker { display: none; }
+.badge-pop-body {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 50;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow); padding: 12px 14px; min-width: 240px;
+  display: grid; gap: 4px;
+}
+
+/* ---------- stabilitas visual: tanpa layout shift / kedip ---------- */
+.big-num, .tile .t-val, td, .asset-stats strong, .lp-nums strong {
+  font-variant-numeric: tabular-nums;
+}
+.skeleton { min-height: 64px; }
+.card-error {
+  border: 1px dashed var(--border); border-radius: var(--radius-sm);
+  padding: 16px; text-align: center; color: var(--muted);
+}
+@keyframes numflash { from { opacity: 0.45; } to { opacity: 1; } }
+.num-flash { animation: numflash 200ms ease-out; }
+.btn-loading { opacity: 0.6; pointer-events: none; }
+
 /* ---------- cards ---------- */
 .card {
   background: var(--card);
@@ -202,7 +250,7 @@ input::placeholder { color: var(--muted); }
 .tile .t-pct { font-size: 12px; font-weight: 700; }
 
 /* ---------- quick action tiles (mobile) ---------- */
-.qa-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.qa-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .qa-tile {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 14px 4px; font-size: 12px; font-weight: 700; color: var(--dark);
@@ -215,7 +263,6 @@ input::placeholder { color: var(--muted); }
 }
 .qa-tile:nth-child(2) .qa-ic { background: #e8f3fe; color: var(--blue); }
 .qa-tile:nth-child(3) .qa-ic { background: #f1f4f8; color: var(--dark); }
-.qa-tile:nth-child(4) .qa-ic { background: #e6f7f5; color: var(--teal); }
 
 /* ---------- horizontal scroll accounts ---------- */
 .hscroll {
@@ -262,6 +309,33 @@ input::placeholder { color: var(--muted); }
 /* ---------- tables (desktop) ---------- */
 .tbl-wrap { overflow-x: auto; margin: 0 -20px; padding: 0 20px; }
 table.data { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; }
+/* Daftar Aset: fixed layout, tanpa scroll horizontal di viewport >= 900px. */
+table.data.assets { table-layout: fixed; min-width: 0; }
+table.data.assets th, table.data.assets td { overflow-wrap: anywhere; }
+table.data.assets .col-aset { width: 28%; }
+table.data.assets .col-jenis { width: 11%; }
+table.data.assets .col-qty { width: 13%; }
+table.data.assets .col-harga { width: 18%; }
+table.data.assets .col-nilai { width: 18%; }
+table.data.assets .col-pl { width: 12%; }
+table.data.assets .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+table.data.assets .type-chip { white-space: nowrap; }
+table.data.assets .wallet-chip { margin-left: 6px; }
+table.data.assets .badges .wallet-chip { margin-left: 0; margin-right: 4px; }
+table.data.assets td[style*="text-align:right"] { white-space: nowrap; font-size: 13px; }
+table.data.assets .copy-btn { white-space: nowrap; padding: 4px 8px; font-size: 11px; min-height: 30px; }
+/* Tabel wallet (Token & LP): fixed juga agar tak scroll di desktop sempit. */
+table.data.fixed { table-layout: fixed; min-width: 0; }
+table.data.fixed th, table.data.fixed td { overflow-wrap: anywhere; }
+table.data.fixed td.num { white-space: nowrap; font-size: 13px; }
+table.data.fixed td[style*="text-align:right"] { white-space: nowrap; font-size: 13px; }
+table.data.assets tr[data-cost] { cursor: pointer; }
+table.data.assets tr[data-cost]:hover td { background: #f6faf8; }
+@media (min-width: 900px) and (max-width: 1099px) {
+  table.data.assets { font-size: 13px; }
+  table.data.assets td { padding: 10px 6px; }
+  table.data.assets .avatar { width: 28px !important; height: 28px !important; font-size: 12px !important; }
+}
 table.data th {
   text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--muted); padding: 10px 8px; border-bottom: 1px solid var(--border);
@@ -275,6 +349,10 @@ table.data tr.clickable:hover td { background: #f6faf8; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .toolbar input, .toolbar select { min-height: 40px; font-size: 14px; }
 .toolbar input[type="search"] { flex: 1; min-width: 160px; }
+
+/* ---------- keluar (logout) ---------- */
+#sidebar .side-foot .btn-logout { width: 100%; margin-top: 10px; }
+#topbar .btn-logout { min-height: 40px; padding: 8px 13px; font-size: 13px; }
 
 /* ---------- modal: bottom sheet on mobile, centered on desktop ---------- */
 .modal-back {
@@ -342,7 +420,6 @@ table.data tr.clickable:hover td { background: #f6faf8; }
 [data-theme="dark"] .qa-tile .qa-ic { background: #1d3a30; color: #34d399; }
 [data-theme="dark"] .qa-tile:nth-child(2) .qa-ic { background: #1c3148; color: #60a5fa; }
 [data-theme="dark"] .qa-tile:nth-child(3) .qa-ic { background: #2a3340; color: #cbd5e1; }
-[data-theme="dark"] .qa-tile:nth-child(4) .qa-ic { background: #173a38; color: #2dd4bf; }
 [data-theme="dark"] .acc-card,
 [data-theme="dark"] .watch-card,
 [data-theme="dark"] input,

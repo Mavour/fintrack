@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { qtyTimesPriceIdr, plPercent, parseQty } from '../src/server/services/money.js';
 import { pruneHistory } from '../src/server/providers/priceStore.js';
 import { backfillSymbol } from '../src/server/providers/historyBackfill.js';
-import { diversificationScore, type AssetValuation, valuateAsset } from '../src/server/services/portfolioService.js';
+import { diversificationScore, type AssetValuation, valuateAsset, getUnifiedPortfolio, getWalletTokens } from '../src/server/services/portfolioService.js';
 import { createFxRateProvider } from '../src/server/providers/fxRate.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -26,8 +26,9 @@ describe('P/L + qty math (no float errors)', () => {
   });
 
   it('diversification: single type scores low, mixed scores high', () => {
-    const mk = (type: 'crypto' | 'saham' | 'reksadana', v: number): AssetValuation => ({
+const mk = (type: 'crypto' | 'saham' | 'reksadana', v: number): AssetValuation => ({
       id: 1, type, symbol: type, name: '', qty: '1', avg_buy_price_idr: 0,
+      chain: null, mint: null, superseded_by_wallet: 0,
       created_at: '', updated_at: '', current_price_idr: v, current_value_idr: v,
       current_price_usd: null, current_value_usd: null,
       cost_idr: v, pl_idr: 0, pl_percent: 0, price_source: 'manual',
@@ -84,6 +85,162 @@ describe('FX conversion', () => {
     await expect(getRate()).resolves.toBe(16000);
     // crypto USD 100 * 16000 = Rp1.600.000
     expect(qtyTimesPriceIdr('1', 100 * 16000)).toBe(1_600_000);
+  });
+});
+
+describe('mint-keyed supersede terhadap posisi wallet', () => {
+  function memDb() {
+    const db = new Database(':memory:');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    db.exec(fs.readFileSync(path.join(here, '..', 'src', 'server', 'db', 'schema.sql'), 'utf-8'));
+    db.prepare(`INSERT INTO fx_cache (pair, rate, fetched_at) VALUES ('USDIDR', 16000, datetime('now'))`).run();
+    return db;
+  }
+
+  it('dua token beda mint dengan symbol sama (FEBU) tidak dobel; manual disembunyikan by mint', () => {
+    const db = memDb();
+    db.prepare(
+      `INSERT INTO assets (type, symbol, qty, avg_buy_price_idr, chain, mint)
+       VALUES ('crypto','FEBU','56.158085',0,'solana','mintA'),
+              ('crypto','FEBU_Q6IF','61.442144',0,'solana','mintB')`,
+    ).run();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source, fetched_at)
+                VALUES ('FEBU', 1600, 'manual', datetime('now')),
+                       ('FEBU_Q6IF', 1600, 'manual', datetime('now'))`).run();
+    db.prepare(
+      `INSERT INTO wallets (label, address, network_type) VALUES ('Solana Utama','3keq3cRtYuoPCYBUL4s6N52ePguGivSZpNU4fzSiPXpd','solana')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (1,'solana','token','solana-rpc','FEBU','febu','56.158085',100,5615,'{"mint":"mintA"}'),
+              (1,'solana','token','solana-rpc','FEBU','febu','61.442144',100,6144,'{"mint":"mintB"}')`,
+    ).run();
+    const u = getUnifiedPortfolio(db);
+    // Keduanya ambigu secara symbol (wallet FEBU punya dua mint) → mint jadi kunci:
+    // manual dengan mint yang ada di wallet tidak lagi dirender sama sekali.
+    expect(u.assets.find((a) => a.symbol === 'FEBU')).toBeUndefined();
+    expect(u.assets.find((a) => a.symbol === 'FEBU_Q6IF')).toBeUndefined();
+    const flags = db.prepare('SELECT symbol, superseded_by_wallet FROM assets ORDER BY symbol').all() as Array<{ symbol: string; superseded_by_wallet: number }>;
+    expect(flags).toEqual([
+      { symbol: 'FEBU', superseded_by_wallet: 1 },
+      { symbol: 'FEBU_Q6IF', superseded_by_wallet: 1 },
+    ]);
+    expect(u.total_value_idr).toBe((5615 + 6144) * 16000);
+    db.close();
+  });
+
+  it('aset manual tanpa mint tetap supersede by symbol (chain kosong = cocok semua)', () => {
+    const db = memDb();
+    db.prepare(
+      `INSERT INTO assets (type, symbol, qty, avg_buy_price_idr) VALUES ('crypto','HYPE','2',0)`,
+    ).run();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source, fetched_at) VALUES ('HYPE', 16000, 'manual', datetime('now'))`).run();
+    db.prepare(
+      `INSERT INTO wallets (label, address, network_type) VALUES ('H','hypeaddr','solana')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (1,'hypercore','token','hyperliquid-spot','HYPE','Hyperliquid','2',10,20,'{"contract":"0x1"}')`,
+    ).run();
+    const u = getUnifiedPortfolio(db);
+    expect(u.assets.find((a) => a.symbol === 'HYPE')).toBeUndefined();
+    const flag = db.prepare('SELECT superseded_by_wallet FROM assets WHERE symbol = ?').get('HYPE') as { superseded_by_wallet: number };
+    expect(flag.superseded_by_wallet).toBe(1);
+    db.close();
+  });
+
+  it('chain manual tidak cocok dengan chain wallet → TIDAK supersede', () => {
+    const db = memDb();
+    db.prepare(
+      `INSERT INTO assets (type, symbol, qty, avg_buy_price_idr, chain) VALUES ('crypto','HYPE','2',0,'arb')`,
+    ).run();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source, fetched_at) VALUES ('HYPE', 16000, 'manual', datetime('now'))`).run();
+    db.prepare(
+      `INSERT INTO wallets (label, address, network_type) VALUES ('H','hypeaddr','solana')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (1,'hypercore','token','hyperliquid-spot','HYPE','Hyperliquid','2',10,20,'{"contract":"0x1"}')`,
+    ).run();
+    const u = getUnifiedPortfolio(db);
+    expect(u.assets.find((a) => a.symbol === 'HYPE')).toBeDefined();
+    const flag = db.prepare('SELECT superseded_by_wallet FROM assets WHERE symbol = ?').get('HYPE') as { superseded_by_wallet: number };
+    expect(flag.superseded_by_wallet).toBe(0);
+    db.close();
+  });
+
+  it('flag supersede turun saat posisi wallet dihapus (aset manual kembali tampil)', () => {
+    const db = memDb();
+    db.prepare(
+      `INSERT INTO assets (type, symbol, qty, avg_buy_price_idr) VALUES ('crypto','HYPE','2',0)`,
+    ).run();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source, fetched_at) VALUES ('HYPE', 16000, 'manual', datetime('now'))`).run();
+    db.prepare(
+      `INSERT INTO wallets (label, address, network_type) VALUES ('H','hypeaddr','solana')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (1,'hypercore','token','hyperliquid-spot','HYPE','Hyperliquid','2',10,20,'{"contract":"0x1"}')`,
+    ).run();
+    expect(getUnifiedPortfolio(db).assets.find((a) => a.symbol === 'HYPE')).toBeUndefined();
+    db.prepare('DELETE FROM wallet_positions').run();
+    const u = getUnifiedPortfolio(db);
+    const hype = u.assets.find((a) => a.symbol === 'HYPE')!;
+    expect(hype).toBeDefined();
+    expect(hype.current_value_idr).toBe(2 * 16000);
+    const flag = db.prepare('SELECT superseded_by_wallet FROM assets WHERE symbol = ?').get('HYPE') as { superseded_by_wallet: number };
+    expect(flag.superseded_by_wallet).toBe(0);
+    db.close();
+  });
+});
+
+describe('filter token Daftar Aset (tanpa harga / < $1)', () => {
+  function memDb() {
+    const db = new Database(':memory:');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    db.exec(fs.readFileSync(path.join(here, '..', 'src', 'server', 'db', 'schema.sql'), 'utf-8'));
+    db.prepare(`INSERT INTO fx_cache (pair, rate, fetched_at) VALUES ('USDIDR', 16000, datetime('now'))`).run();
+    return db;
+  }
+
+  it('debu (< $1) dan token tanpa harga wallet disembunyikan, dihitung di hidden_tokens', () => {
+    const db = memDb();
+    db.prepare(
+      `INSERT INTO wallets (label, address, network_type) VALUES ('Solana Utama','3keq3cRtYuoPCYBUL4s6N52ePguGivSZpNU4fzSiPXpd','solana')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (1,'solana','token','solana-rpc','FEBU','febu','56.158085',0.01,0.5,'{}'),
+              (1,'solana','token','solana-rpc','XYZ','no price','10',NULL,NULL,'{}'),
+              (1,'solana','token','solana-rpc','SOL','Solana','1.5',150,225,'{}')`,
+    ).run();
+    const { tokens, hiddenCount } = getWalletTokens(db);
+    expect(tokens.map((t) => t.symbol)).toEqual(['SOL']);
+    expect(hiddenCount).toBe(2);
+    const u = getUnifiedPortfolio(db);
+    expect(u.wallet_tokens.map((t) => t.symbol)).toEqual(['SOL']);
+    expect(u.hidden_tokens).toBe(2);
+    expect(u.total_value_idr).toBe(225 * 16000);
+    db.close();
+  });
+
+  it('manual tanpa harga / < $1 tidak dirender; LP legacy (< $1) tetap dikecualikan dari filter', () => {
+    const db = memDb();
+    db.prepare(
+      `INSERT INTO assets (type, symbol, qty, avg_buy_price_idr) VALUES
+       ('crypto','DEBU','1',0), ('crypto','NORAPRICE','1',0), ('crypto','LP-DEBU','1',0), ('crypto','SOL','1',0)`,
+    ).run();
+    db.prepare(`INSERT INTO price_cache (symbol, price_idr, source)
+                VALUES ('DEBU', 4800, 'manual'), ('LP-DEBU', 4800, 'manual'), ('SOL', 1600000, 'manual')`).run();
+    const u = getUnifiedPortfolio(db);
+    const syms = u.assets.map((a) => a.symbol);
+    // DEBU (0.3×16000 < $1) & NORAPRICE (tanpa harga) → tersembunyi; LP- dikecualikan dari filter; SOL tampil.
+    expect(syms).toContain('SOL');
+    expect(syms).toContain('LP-DEBU');
+    expect(syms).not.toContain('DEBU');
+    expect(syms).not.toContain('NORAPRICE');
+    expect(u.total_value_idr).toBe(1600000 + 4800);
+    db.close();
   });
 });
 

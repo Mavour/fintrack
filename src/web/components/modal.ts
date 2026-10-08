@@ -49,19 +49,99 @@ export function wireCatOptions(body: HTMLElement): void {
     catSel.innerHTML = catOptions(kindSel.value);
   });
 }
-export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'expense'): string {
-  const accOpts = accounts.map((a) => `<option value="${a.id}">${a.name}</option>`).join('');
-  return `
-    <label for="f-kind">Jenis</label>
-    <select id="f-kind">
-      <option value="expense" ${kind === 'expense' ? 'selected' : ''}>Pengeluaran</option>
-      <option value="income" ${kind === 'income' ? 'selected' : ''}>Pemasukan (Top Up)</option>
-      <option value="transfer" ${kind === 'transfer' ? 'selected' : ''}>Transfer</option>
-    </select>
-    <label for="f-amount">Nominal (Rp)</label><input id="f-amount" type="number" min="1" step="1" inputmode="numeric" required />
-    <label for="f-acc">Dari akun</label><select id="f-acc">${accOpts}</select>
-    <div id="f-to-wrap" style="display:none"><label for="f-to">Ke akun</label><select id="f-to">${accOpts}</select></div>
-    <label for="f-cat">Kategori</label><select id="f-cat">${catOptions(kind)}</select>
-    <label for="f-note">Catatan</label><input id="f-note" placeholder="cth. Kopi" />
-    <button class="btn-primary" id="f-save">Simpan</button>`;
+const KIND_LABEL: Record<string, string> = {
+  expense: 'Pengeluaran',
+  income: 'Pemasukan (Top Up)',
+  transfer: 'Transfer',
+};
+
+const escAttr = (s: string): string =>
+  s.replace(/[&"'<>]/g, (c) => (c === '&' ? '&amp;' : c === '"' ? '&quot;' : c === "'" ? '&#39;' : c === '<' ? '&lt;' : '&gt;'));
+
+/** ISO → nilai <input type="datetime-local"> (waktu lokal pembaca). */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
+  if (isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Baca input tanggal-waktu dari body form. Kosong = waktu sekarang. */
+export function readOccurredAt(body: HTMLElement): string {
+  const el = body.querySelector('#f-date') as HTMLInputElement | null;
+  const v = el?.value ?? '';
+  return v ? new Date(v).toISOString() : new Date().toISOString();
+}
+
+export interface TxFormInit {
+  amount_idr?: number | null;
+  account_id?: number | null;
+  to_account_id?: number | null;
+  category?: string | null;
+  note?: string | null;
+  occurred_at?: string | null;
+  /** Mode ubah: jenis tidak bisa diganti (sama dengan sisi server). */
+  lockKind?: boolean;
+  /** Mode ubah: akun asal (dan tujuan saat transfer) tidak bisa diganti. */
+  lockAccounts?: boolean;
+}
+
+export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'expense', init?: TxFormInit): string {
+  const accOpts = accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(init?.account_id ?? '') ? 'selected' : ''}>${a.name}</option>`).join('');
+  const accName = (id: number | null | undefined): string => (id == null ? '' : accounts.find((a) => a.id === id)?.name ?? '');
+
+  let cats = catOptions(kind);
+  if (init?.category) {
+    const lit = `<option>${escAttr(init.category)}</option>`;
+    cats = cats.includes(lit)
+      ? cats.replace(lit, `<option selected>${escAttr(init.category)}</option>`)
+      : `<option selected>${escAttr(init.category)}</option>${cats}`;
+  }
+
+  const fields: string[] = [];
+  if (init?.lockKind) {
+    fields.push(
+      `<label for="f-kind">Jenis</label><div class="muted" style="margin-top:-6px">${KIND_LABEL[kind] ?? kind} — tidak bisa diubah</div><input type="hidden" id="f-kind" value="${kind}" />`,
+    );
+  } else {
+    fields.push(
+      `<label for="f-kind">Jenis</label>
+      <select id="f-kind">
+        <option value="expense" ${kind === 'expense' ? 'selected' : ''}>Pengeluaran</option>
+        <option value="income" ${kind === 'income' ? 'selected' : ''}>Pemasukan (Top Up)</option>
+        <option value="transfer" ${kind === 'transfer' ? 'selected' : ''}>Transfer</option>
+      </select>`,
+    );
+  }
+
+  fields.push(
+    `<label for="f-amount">Nominal (Rp)</label><input id="f-amount" type="number" min="1" step="1" inputmode="numeric" value="${init?.amount_idr ?? ''}" required />`,
+  );
+
+  if (init?.lockAccounts) {
+    fields.push(
+      `<label for="f-acc">Dari akun</label><div class="muted" style="margin-top:-6px">${accName(init.account_id) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-acc" value="${init.account_id ?? ''}" />`,
+    );
+    if (kind === 'transfer') {
+      fields.push(
+        `<div class="muted" style="margin-top:2px">Ke akun: ${accName(init.to_account_id) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-to" value="${init.to_account_id ?? ''}" />`,
+      );
+    }
+    fields.push(`<div id="f-to-wrap" style="display:none"></div>`);
+  } else {
+    fields.push(
+      `<label for="f-acc">Dari akun</label><select id="f-acc">${accOpts}</select>`,
+      `<div id="f-to-wrap" style="display:none"><label for="f-to">Ke akun</label><select id="f-to">${accOpts}</select></div>`,
+    );
+  }
+
+  fields.push(
+    `<label for="f-cat">Kategori</label><select id="f-cat">${cats}</select>`,
+    `<label for="f-date">Tanggal &amp; waktu</label><input id="f-date" type="datetime-local" value="${init?.occurred_at ? toLocalInput(init.occurred_at) : ''}" />
+    <div class="muted" style="margin-top:-6px">Kosongkan = waktu sekarang.</div>`,
+    `<label for="f-note">Catatan</label><input id="f-note" value="${escAttr(init?.note ?? '')}" placeholder="cth. Kopi" />`,
+    `<button class="btn-primary" id="f-save">Simpan</button>`,
+  );
+
+  return fields.join('\n');
 }

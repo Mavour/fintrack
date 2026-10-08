@@ -1,0 +1,20 @@
+{
+  "_note": "Fixture DeBank Cloud OpenAPI (disamarkan). Endpoint: /v1/user/all_token_list, /v1/user/all_complex_protocol_list, /v1/chain/list. Docs https://docs.cloud.debank.com/en/readme/open-api. Nilai & alamat disamarkan.",
+  "all_token_list": [
+    { "id": "eth", "chain": "eth", "symbol": "ETH", "name": "Ethereum", "amount": 0.5, "price": 3000.0 },
+    { "id": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eX", "chain": "eth", "symbol": "USDC", "name": "USD Coin", "amount": 100.0, "price": 1.0 }
+  ],
+  "all_complex_protocol_list": [
+    {
+      "chain": "arb",
+      "protocol_id": "uniswap_v3",
+      "name": "Uniswap V3",
+      "net_usd_value": 500.0,
+      "portfolio_item_list": [{ "name": "ETH-USDC", "stats": { "net_usd_value": 500.0 } }]
+    }
+  ],
+  "chain_list": [
+    { "id": "eth", "name": "Ethereum" },
+    { "id": "arb", "name": "Arbitrum" }
+  ]
+}

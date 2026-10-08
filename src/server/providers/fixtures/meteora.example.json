@@ -1,0 +1,52 @@
+{
+  "_note": "Fixture respons MENTAH DLMM Data API — GET /portfolio/open?user=<wallet> (diverifikasi live, alamat disamarkan). Nilai posisi = balances & unclaimedFees (string USD). PnL tidak dipakai (tidak ada kolom PnL). TVL pool diambil best-effort terpisah via GET /pools?filter_by=pool_address=.",
+  "page": 1,
+  "pageSize": 50,
+  "hasNext": false,
+  "totalCount": 2,
+  "totalPositions": 2,
+  "solPrice": 117.7,
+  "total": { "balances": "91.29" },
+  "pools": [
+    {
+      "poolAddress": "6D4EWF22HfQamimKhX47tqiu9DVCkcxDMrmhnSvewKAo",
+      "binStep": 100,
+      "baseFee": 4200,
+      "collectFeeMode": "all",
+      "tokenXMint": "HOTBOTMINT111111111111111111111111111111",
+      "tokenYMint": "So11111111111111111111111111111111111111112",
+      "tokenX": "HOTBOT",
+      "tokenY": "SOL",
+      "balances": "58.83",
+      "balancesSol": "0.5",
+      "unclaimedFees": "0.0029",
+      "feePerTvl24h": 0.001,
+      "totalDeposit": "20",
+      "openPositionCount": 1,
+      "outOfRange": false,
+      "poolPrice": 0.5,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "listPositions": [ "Pos1t10nAddrEss11111111111111111111111111X" ]
+    },
+    {
+      "poolAddress": "2owmMMZ75otJBYmqr9xVRaDp4gMFnnHoPtucRR95E2Gy",
+      "binStep": 10,
+      "baseFee": 500,
+      "collectFeeMode": "all",
+      "tokenXMint": "TWTCFTMINT1111111111111111111111111111111",
+      "tokenYMint": "So11111111111111111111111111111111111111112",
+      "tokenX": "TWEETCRAFT",
+      "tokenY": "SOL",
+      "balances": "32.46",
+      "balancesSol": "0.27",
+      "unclaimedFees": "1.456",
+      "feePerTvl24h": 0.02,
+      "totalDeposit": "0",
+      "openPositionCount": 1,
+      "outOfRange": null,
+      "poolPrice": 0.01,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "listPositions": [ { "positionAddress": "Pos2t10nAddrEss22222222222222222222222222X" } ]
+    }
+  ]
+}
