@@ -19,7 +19,7 @@ export const UpdateTxSchema = z.object({
   category: z.string().min(1).max(60).optional(),
   note: z.string().max(500).optional(),
   occurred_at: z.string().optional(),
-  amount_idr: z.number().int().positive().optional(),
+  amount_idr: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
 });
 export type UpdateTxInput = z.infer<typeof UpdateTxSchema>;
 
@@ -43,6 +43,12 @@ function getBalance(db: Database.Database, id: number): number {
   return row.balance_idr;
 }
 
+function validateBalance(balance: number): void {
+  if (balance < 0) throw Object.assign(new Error('Insufficient balance'), { statusCode: 400 });
+  if (!Number.isSafeInteger(balance))
+    throw Object.assign(new Error('Balance exceeds safe integer limit'), { statusCode: 400 });
+}
+
 /** Apply a transaction effect to balances. sign=+1 apply, sign=-1 revert. */
 function applyEffect(
   db: Database.Database,
@@ -52,28 +58,32 @@ function applyEffect(
   if (tx.kind === 'expense') {
     const bal = getBalance(db, tx.account_id!);
     const next = bal - sign * tx.amount_idr;
-    if (next < 0) throw Object.assign(new Error('Insufficient balance'), { statusCode: 400 });
+    validateBalance(next);
     db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
       next,
       tx.account_id,
     );
   } else if (tx.kind === 'income') {
     const bal = getBalance(db, tx.account_id!);
+    const next = bal + sign * tx.amount_idr;
+    validateBalance(next);
     db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      bal + sign * tx.amount_idr,
+      next,
       tx.account_id,
     );
   } else {
     const fromBal = getBalance(db, tx.account_id!);
     const toBal = getBalance(db, tx.to_account_id!);
     const nextFrom = fromBal - sign * tx.amount_idr;
-    if (nextFrom < 0) throw Object.assign(new Error('Insufficient balance'), { statusCode: 400 });
+    const nextTo = toBal + sign * tx.amount_idr;
+    validateBalance(nextFrom);
+    validateBalance(nextTo);
     db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
       nextFrom,
       tx.account_id,
     );
     db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      toBal + sign * tx.amount_idr,
+      nextTo,
       tx.to_account_id,
     );
   }
@@ -151,7 +161,7 @@ export function listTransactions(
 
 /**
  * Update supports changing amount/category/note/occurred_at.
- * Balance is corrected atomically: revert old effect, apply new effect.
+ * Balance is corrected atomically by applying only the amount difference.
  * Account linkage is immutable (delete + recreate instead) to keep logic safe.
  */
 export function updateTransaction(db: Database.Database, id: number, input: UpdateTxInput): Tx {
@@ -160,12 +170,11 @@ export function updateTransaction(db: Database.Database, id: number, input: Upda
   if (!existing) throw Object.assign(new Error('Transaction not found'), { statusCode: 404 });
   const nextAmount = parsed.amount_idr ?? existing.amount_idr;
   const atomic = db.transaction(() => {
-    applyEffect(db, existing, -1);
-    applyEffect(
+    if (nextAmount !== existing.amount_idr) applyEffect(
       db,
       {
         kind: existing.kind,
-        amount_idr: nextAmount,
+        amount_idr: nextAmount - existing.amount_idr,
         account_id: existing.account_id,
         to_account_id: existing.to_account_id,
       },
