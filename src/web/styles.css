@@ -726,9 +726,11 @@ body.login-full {
   #sidebar {
     display: flex; flex-direction: column;
     position: sticky; top: 0; height: 100dvh;
+    overflow-y: auto; overscroll-behavior: contain;
     background: #102c2b; border-right: 0;
     padding: 30px 18px 20px;
   }
+  #sidebar > * { flex-shrink: 0; }
   #sidebar .side-logo { display: flex; align-items: center; gap: 10px; padding: 0 10px 34px; }
   #sidebar nav { display: flex; flex-direction: column; gap: 6px; }
   #sidebar nav a {
@@ -998,6 +1000,24 @@ details[open] > summary .detail-toggle { transform: rotate(180deg); }
   .home-balanced .acc-card .a-name, .home-balanced .acc-card .a-type { max-width: none; }
   .home-balanced .allocation-card { display: flex; flex-direction: column; }
   .home-balanced .allocation-chart { margin: auto 0; padding-top: 20px; }
+}
+@media (min-width: 900px) and (max-height: 800px) {
+  #sidebar { padding-top: 22px; padding-bottom: 16px; }
+  #sidebar .side-logo { padding-bottom: 20px; }
+  #sidebar nav a { min-height: 44px; padding: 10px 12px; }
+  #sidebar .side-note { margin-top: 24px; padding: 14px; }
+  #sidebar .side-note-icon, #sidebar .side-note p { display: none; }
+  #sidebar .side-note a { display: block; margin-top: 8px; }
+  #sidebar .side-foot { padding-top: 14px; }
+  #topbar { padding-top: 14px; padding-bottom: 14px; }
+  #pagehead { padding-top: 12px; }
+  #app { padding-top: 12px; }
+  .dashboard-intro { margin: 4px 0 18px; }
+  .dashboard-intro h1 { font-size: 26px; }
+  .wealth-card { padding: 24px; }
+  .wealth-card .big-num { font-size: clamp(30px, 8cqi, 48px); margin: 12px 0; }
+  .wealth-card .wealth-caption { margin-bottom: 20px; }
+  .wealth-card .tiles { margin-top: 18px; }
 }
 @media (max-width: 899px) {
   .portfolio-workspace { gap: 12px; }
