@@ -963,7 +963,7 @@ details[open] > summary .detail-toggle { transform: rotate(180deg); }
   .portfolio-summary .risk-disclosure { grid-column: 1 / -1; }
   .home-balanced > .span7 { grid-column: 1 / span 7; grid-row: 1; align-self: start; }
   .home-balanced > .span7 > .wealth-card { flex: none; }
-  .home-balanced > .span5 { grid-column: 8 / span 5; grid-row: 1; align-self: start; }
+  .home-balanced > .span5 { grid-column: 8 / span 5; grid-row: 1; align-self: stretch; }
   .home-balanced > .home-trend { grid-column: 1 / -1; grid-row: 2; }
   .home-balanced > .span4 { grid-column: 1 / span 4; grid-row: 3; }
   .home-balanced > .span6:nth-child(5) { grid-column: 5 / span 8; grid-row: 3; }
