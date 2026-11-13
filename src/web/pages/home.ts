@@ -68,7 +68,9 @@ export async function renderHome(el: HTMLElement): Promise<void> {
     return `<div class="tile" data-live-allocation="${label}"><div class="t-label">${tileLabel}</div><div class="t-val">${showCompact(v)}</div><div class="t-pct">${((v / total) * 100).toFixed(0)}% dari total</div></div>`;
   };
 
-  const accCards = accounts
+  const accCards = [...accounts]
+    .sort((a, b) => b.balance_idr - a.balance_idr)
+    .slice(0, 4)
     .map(
       (a) => `<button class="acc-card" data-acc="${a.id}"><div class="a-name">${escHtml(a.name)}</div><div class="a-type">${escHtml(a.type.replace('_', ' '))}</div><div class="a-bal">${show(a.balance_idr)}</div></button>`,
     )
@@ -121,7 +123,7 @@ export async function renderHome(el: HTMLElement): Promise<void> {
     el.innerHTML = `${intro}<div class="grid12 home-grid home-balanced">
       <div class="span7">${balanceCard}</div>
       <div class="span5">${sumberDana}</div>
-      <div class="span8">${trendCard}</div>
+      <div class="span12 home-trend">${trendCard}</div>
       <div class="span4"><div class="card allocation-card"><span class="eyebrow">Komposisi kekayaan</span><h2 class="section-heading">Alokasi aset</h2><div class="allocation-chart">${donut(sorted.map((a, i) => ({ label: a.label, value: a.value_idr, color: ALLOC_COLORS[i % 4] })))}</div></div></div>
       <div class="span6"><div class="card"><div class="between"><div><span class="eyebrow">Portofolio Anda</span><h2 class="section-heading">Aset terbesar</h2></div><a class="text-link" href="#/portofolio">Lihat semua ↗</a></div><div class="grid2">${watchHtml}</div></div></div>
       <div class="span6"><div class="card"><div class="between"><h2 class="section-heading">Transaksi terkini</h2><a class="text-link" href="#/transaksi">Lihat semua ↗</a></div>${recentTx(txs)}</div></div>
