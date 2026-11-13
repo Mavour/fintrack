@@ -1,4 +1,5 @@
 import { api, isTemporaryApiError } from '../lib/api.js';
+import { renderContent } from '../lib/patchContent.js';
 import { formatIdr, timeAgo } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal } from '../components/modal.js';
@@ -12,12 +13,12 @@ interface SyncRow {
   provider: string; wallet_id: number | null; last_success_at: string | null; last_error: string | null; updated_at: string;
 }
 
-export async function renderAccounts(el: HTMLElement): Promise<void> {
+export async function renderAccounts(el: HTMLElement, background = false): Promise<void> {
   if (!el.innerHTML.trim()) el.innerHTML = `<div class="card"><div class="skeleton"></div></div>`;
   try {
-    await renderAccountsInner(el);
+    await renderAccountsInner(el, background);
   } catch (e) {
-    if (isTemporaryApiError(e)) throw e;
+    if (background || isTemporaryApiError(e)) throw e;
     el.innerHTML = `<div class="card"><div class="card-error">Gagal memuat, coba lagi.</div></div>`;
   }
 }
@@ -47,7 +48,8 @@ export function openAddAccountModal(onSaved: () => void): void {
   };
 }
 
-async function renderAccountsInner(el: HTMLElement): Promise<void> {
+async function renderAccountsInner(el: HTMLElement, background: boolean): Promise<void> {
+  const routeHash = background ? location.hash : '';
   const accounts = (await api.get('/api/accounts')) as Array<{
     id: number; name: string; type: string; balance_idr: number; is_active: number;
   }>;
@@ -86,10 +88,12 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
       const calls = Object.entries(st.debank.calls_24h ?? {}).map(([k, v]) => `${escHtml(k)}: ${Number(v)}`).join(' • ');
       if (calls) debankLine += `<div class="muted">Unit per endpoint (24 jam): ${calls}</div>`;
     }
-  } catch {
+  } catch (error) {
+    if (background) throw error;
     wallets = [];
   }
-  el.innerHTML = `
+  if (background && (location.hash !== routeHash || document.querySelector('.modal-back'))) return;
+  renderContent(el, `
   <div class="card">
     <div class="between"><div><span class="eyebrow">Total Kas</span><div class="big-num" style="font-size:26px">${isPrivat() ? '••••••' : formatIdr(total)}</div></div>
     <button class="btn-primary" id="btn-add">+ Akun</button></div>
@@ -138,7 +142,7 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
       </div>`;
     }).join('') || '<div class="empty">Belum ada wallet. Tambahkan alamat Solana / EVM.</div>'}
     </div>
-  </div>`;
+  </div>`, background);
 
   document.getElementById('btn-add')!.onclick = () => openAddAccountModal(() => renderAccounts(el));
 

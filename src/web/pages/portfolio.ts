@@ -1,4 +1,5 @@
 import { api } from '../lib/api.js';
+import { patchContent, renderContent } from '../lib/patchContent.js';
 import { formatIdr, formatPct, formatUsd, timeAgo } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { coinAvatar } from '../lib/coinIcons.js';
@@ -133,7 +134,7 @@ export function applyLivePortfolio(el: HTMLElement, frame: PortfolioFrame): void
     subtotalUsd += a?.current_value_usd ?? w?.value_usd ?? 0;
     if (a && a.type !== 'crypto') return;
     const desktop = row.tagName === 'TR';
-    const set = (selector: string, html: string) => { const node = row.querySelector(selector); if (node) node.innerHTML = html; };
+    const set = (selector: string, html: string) => { const node = row.querySelector(selector); if (node) patchContent(node, html); };
     const price = a ? assetPrice(a) : w!.price_idr !== null ? show(w!.price_idr) : '—';
     const usd = isPrivat() ? null : a?.current_price_usd ?? w?.price_usd ?? null;
     const value = a?.current_value_idr ?? w?.value_idr ?? null;
@@ -165,7 +166,8 @@ function usdNote(v: number | null, isCrypto: boolean): string {
   return ` <span class="muted">(${formatUsd(v)})</span>`;
 }
 
-export async function renderPortfolio(el: HTMLElement): Promise<void> {
+export async function renderPortfolio(el: HTMLElement, background = false): Promise<void> {
+  const routeHash = background ? location.hash : '';
   const renderId = ++portfolioRenderId;
   const openPanels = new Set([...el.querySelectorAll<HTMLDetailsElement>('details[data-panel][open]')].map((d) => d.dataset.panel));
   // Tanpa kedip: skeleton hanya saat pertama (konten lama dipertahankan saat refresh SSE).
@@ -239,6 +241,13 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
     return d * assetSort.dir;
   };
   const spotSorted = [...spot].sort(cmp);
+  if (background) {
+    // Keep cards under the reader's finger; explicit sorting still rebuilds normally.
+    const order = new Map([...el.querySelectorAll<HTMLElement>('#panel-assets [data-edit], #panel-assets [data-cost]')]
+      .map((row, i) => [row.dataset.edit ? `m:${row.dataset.edit}` : `w:${row.dataset.cost}`, i]));
+    const rank = (row: assetRow) => order.get(row.k === 'm' ? `m:${row.a.symbol}` : `w:${row.w.asset_key ?? row.w.symbol}`) ?? Infinity;
+    spotSorted.sort((a, b) => rank(a) - rank(b));
+  }
   // Ringkasan daftar yang sedang tampil (mengikuti filter aktif).
   const asetTotalIdr = spotSorted.reduce((s, r) => s + valOf(r), 0);
   const asetTotalUsd = spotSorted.reduce(
@@ -325,7 +334,8 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
     { key: 'orders', label: 'Limit Order', count: defiList.length },
   ];
   if (renderId !== portfolioRenderId) return;
-  el.innerHTML = `<div class="portfolio-workspace">
+  if (background && (location.hash !== routeHash || document.querySelector('.modal-back'))) return;
+  renderContent(el, `<div class="portfolio-workspace">
     <div class="portfolio-actions"><span class="muted">Ringkasan seluruh investasi</span><div class="row">${buttons}</div></div>
     ${summaryCard}
     <div class="portfolio-tools"><details class="card portfolio-insights" data-panel="insights" ${openPanels.has('insights') ? 'open' : ''}>
@@ -337,8 +347,8 @@ export async function renderPortfolio(el: HTMLElement): Promise<void> {
     <section id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" ${positionTab !== 'assets' ? 'hidden' : ''}>${assetsPanel}</section>
     <section id="panel-lp" role="tabpanel" aria-labelledby="tab-lp" ${positionTab !== 'lp' ? 'hidden' : ''}>${lpResult.content}</section>
     <section id="panel-orders" role="tabpanel" aria-labelledby="tab-orders" ${positionTab !== 'orders' ? 'hidden' : ''}>${defiSection}</section>
-  </div>`;
-  el.querySelectorAll<HTMLDetailsElement>('details[data-panel]').forEach((d) => { d.open = openPanels.has(d.dataset.panel); });
+  </div>`, background);
+  if (!background) el.querySelectorAll<HTMLDetailsElement>('details[data-panel]').forEach((d) => { d.open = openPanels.has(d.dataset.panel); });
   const tabButtons = [...el.querySelectorAll<HTMLButtonElement>('[data-position-tab]')];
   const selectTab = (button: HTMLButtonElement): void => {
     positionTab = button.dataset.positionTab as typeof positionTab;

@@ -1,4 +1,5 @@
 import { api } from '../lib/api.js';
+import { renderContent } from '../lib/patchContent.js';
 import { formatIdr, formatCompactIdr, formatPct } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { wealthTrendCard } from '../lib/trend.js';
@@ -39,7 +40,8 @@ export function applyLiveHome(el: HTMLElement, frame: PortfolioFrame): void {
   });
 }
 
-export async function renderHome(el: HTMLElement): Promise<void> {
+export async function renderHome(el: HTMLElement, background = false): Promise<void> {
+  const routeHash = background ? location.hash : '';
   if (!el.innerHTML.trim()) el.innerHTML = `<div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>`.repeat(3);
   const month = new Date().toISOString().slice(0, 7);
   const [dash, accounts, txs, pf] = await Promise.all([
@@ -119,8 +121,10 @@ export async function renderHome(el: HTMLElement): Promise<void> {
     sub: 'Total kas + investasi',
   });
 
+  if (background && (location.hash !== routeHash || document.querySelector('.modal-back'))) return;
+  let html: string;
   if (isDesktop()) {
-    el.innerHTML = `${intro}<div class="grid12 home-grid home-balanced">
+    html = `${intro}<div class="grid12 home-grid home-balanced">
       <div class="span7">${balanceCard}</div>
       <div class="span5">${sumberDana}</div>
       <div class="span12 home-trend">${trendCard}</div>
@@ -130,12 +134,14 @@ export async function renderHome(el: HTMLElement): Promise<void> {
       ${dash.expense_by_category.length ? `<div class="span12"><div class="card"><h2 class="section-heading">Pengeluaran per kategori</h2><div style="margin-top:14px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div></div>` : ''}
     </div>`;
   } else {
-    el.innerHTML = `${intro}${balanceCard}${qaTiles}${sumberDana}
+    html = `${intro}${balanceCard}${qaTiles}${sumberDana}
       <div class="card"><div class="between"><h2 class="section-heading">Aset terbesar</h2><a class="text-link" href="#/portofolio">Lihat semua ↗</a></div><div class="grid2">${watchHtml}</div></div>
       ${trendCard}
       ${dash.expense_by_category.length ? `<div class="card"><strong>Pengeluaran bulan ini</strong><div style="margin-top:8px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div>` : ''}
       <div class="card"><div class="between"><strong>Transaksi terkini</strong><a href="#/transaksi">Semua</a></div>${recentTx(txs)}</div>`;
   }
+
+  renderContent(el, html, background);
 
   el.querySelectorAll('[data-q]').forEach(
     (b) => ((b as HTMLElement).onclick = () => (location.hash = `#/transaksi?baru=${(b as HTMLElement).dataset.q}`)),

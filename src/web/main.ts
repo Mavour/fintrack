@@ -13,6 +13,7 @@ import { renderTransactions } from './pages/transactions.js';
 import { renderAccounts } from './pages/accounts.js';
 import { renderLogin } from './pages/login.js';
 import { installCoinIconHandlers } from './lib/coinIcons.js';
+import { patchContent } from './lib/patchContent.js';
 
 const sidebar = document.getElementById('sidebar')!;
 const bottomnav = document.getElementById('bottomnav')!;
@@ -103,7 +104,7 @@ async function refreshPriceBadge(): Promise<void> {
     priceBadgeHtml = `<span class="badge"><span class="dot"></span>Harga manual</span>`;
   }
   // Jangan bangkitkan chrome di halaman masuk fullscreen.
-  if ((location.hash.split('?')[0] || '#/') !== '#/masuk') renderChrome(getAuthed() === true);
+  topbar.querySelectorAll('[data-sync-badge]').forEach(node => patchContent(node, priceBadgeHtml));
 }
 
 /** Render sidebar XOR bottom nav — never both. Bottom nav node is emptied on desktop. */
@@ -139,7 +140,7 @@ function renderChrome(authenticated: boolean): void {
     ? `
     <div><div class="tb-title">${title}</div><div class="tb-date">${todayLong()}</div></div>
     <div class="row">
-      <div>${priceBadgeHtml}</div>
+      <div data-sync-badge>${priceBadgeHtml}</div>
       <button class="theme-switch" id="btn-theme" role="switch" aria-checked="${dark}" aria-label="Mode gelap/terang" title="Mode gelap/terang">
         <span class="ts-sun">${icons.sun}</span><span class="ts-knob"></span><span class="ts-moon">${icons.moon}</span>
       </button>
@@ -153,7 +154,7 @@ function renderChrome(authenticated: boolean): void {
       </button>
       ${canLogout ? '<button class="btn-ghost btn-logout" id="btn-logout">Keluar</button>' : ''}
     </div>
-    <div class="mobile-sync"><span>Status sinkron</span>${priceBadgeHtml}</div>`;
+    <div class="mobile-sync"><span>Status sinkron</span><div data-sync-badge>${priceBadgeHtml}</div></div>`;
   if (syncOpen) topbar.querySelector('details.badge-pop')?.setAttribute('open', '');
   document.getElementById('btn-theme')?.addEventListener('click', (e) => {
     const next = toggleTheme();
@@ -252,7 +253,9 @@ async function openQuickTx(kind: string): Promise<void> {
   }
 }
 
-async function route(): Promise<void> {
+async function route(background = false): Promise<void> {
+  const currentRoute = location.hash.split('?')[0] || '#/';
+  if (background && (!getAuthed() || app.dataset.loadedRoute !== currentRoute || currentRoute === '#/transaksi')) return;
   // Status sesi dicek sekali (cache); login/logout/401 me-reset cache.
   if (getAuthed() === null) {
     try {
@@ -292,15 +295,18 @@ async function route(): Promise<void> {
   }
   topbar.style.display = '';
   pagehead.style.display = '';
-  renderChrome(getAuthed() === true);
-  renderPagehead();
+  if (!background) {
+    renderChrome(getAuthed() === true);
+    renderPagehead();
+  }
   try {
-    if (h === '#/portofolio') await renderPortfolio(app);
+    if (h === '#/portofolio') await renderPortfolio(app, background);
     else if (h === '#/transaksi') await renderTransactions(app);
-    else if (h === '#/akun') await renderAccounts(app);
-    else await renderHome(app);
+    else if (h === '#/akun') await renderAccounts(app, background);
+    else await renderHome(app, background);
     app.dataset.loadedRoute = h;
   } catch (e) {
+    if (background) return; // Keep the last usable screen when a background read fails.
     if (isTemporaryApiError(e)) {
       if (app.dataset.loadedRoute !== h) app.innerHTML = '<div class="card empty">Menunggu pembaruan data. Akan dimuat otomatis setelah koneksi tersedia.</div>';
       return;
@@ -316,7 +322,7 @@ async function route(): Promise<void> {
 window.matchMedia('(min-width: 900px)').addEventListener?.('change', () => {
   route();
 });
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => void route());
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey) {
     const t = e.target as HTMLElement;
@@ -335,7 +341,7 @@ setInterval(refreshPriceBadge, 60_000);
 applyTheme(getTheme());
 void route();
 
-// Live update tanpa reload: SSE sync:done → refresh badge + halaman aktif.
+// Background SSE updates reconcile changed nodes without replacing the page or restoring scroll.
 // Coalesce bursts; retain updates while a modal is open and avoid overlapping renders.
 let ssePending = false;
 let sseRefreshing = false;
@@ -347,11 +353,9 @@ function scheduleLiveRefresh(): void {
     if (document.hidden || document.querySelector('.modal-back')) return;
     ssePending = false;
     sseRefreshing = true;
-    const y = window.scrollY;
-    const hash = location.hash;
     try {
-      await Promise.all([refreshPriceBadge(), route()]);
-      if (location.hash === hash) window.scrollTo(0, y);
+      const h = location.hash.split('?')[0] || '#/';
+      await Promise.all([refreshPriceBadge(), route(app.dataset.loadedRoute === h)]);
     } finally {
       sseRefreshing = false;
       scheduleLiveRefresh();
