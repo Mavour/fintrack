@@ -14,6 +14,7 @@ import { renderAccounts } from './pages/accounts.js';
 import { renderLogin } from './pages/login.js';
 import { installCoinIconHandlers } from './lib/coinIcons.js';
 import { patchContent } from './lib/patchContent.js';
+import { isScrollActive, trackScrollActivity } from './lib/scrollActivity.js';
 
 const sidebar = document.getElementById('sidebar')!;
 const bottomnav = document.getElementById('bottomnav')!;
@@ -104,7 +105,11 @@ async function refreshPriceBadge(): Promise<void> {
     priceBadgeHtml = `<span class="badge"><span class="dot"></span>Harga manual</span>`;
   }
   // Jangan bangkitkan chrome di halaman masuk fullscreen.
-  topbar.querySelectorAll('[data-sync-badge]').forEach(node => patchContent(node, priceBadgeHtml));
+  paintPriceBadge();
+}
+
+function paintPriceBadge(): void {
+  if (!isScrollActive()) topbar.querySelectorAll('[data-sync-badge]').forEach(node => patchContent(node, priceBadgeHtml));
 }
 
 /** Render sidebar XOR bottom nav — never both. Bottom nav node is emptied on desktop. */
@@ -346,18 +351,31 @@ void route();
 let ssePending = false;
 let sseRefreshing = false;
 let sseTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingPortfolio: PortfolioFrame | null = null;
+function flushPortfolio(): void {
+  if (!pendingPortfolio || isScrollActive() || document.hidden || !getAuthed()) return;
+  const frame = pendingPortfolio;
+  pendingPortfolio = null;
+  rememberApiSnapshot('/api/portfolio', frame);
+  const hash = location.hash.split('?')[0] || '#/';
+  if (hash === '#/portofolio') applyLivePortfolio(app, frame);
+  else if (hash === '#/') applyLiveHome(app, frame);
+}
+trackScrollActivity(() => { paintPriceBadge(); flushPortfolio(); scheduleLiveRefresh(); });
 function scheduleLiveRefresh(): void {
-  if (!ssePending || sseTimer || sseRefreshing || isApiReadPaused() || document.hidden || document.querySelector('.modal-back')) return;
+  if (!ssePending || sseTimer || sseRefreshing || isScrollActive() || isApiReadPaused() || document.hidden || document.querySelector('.modal-back')) return;
   sseTimer = setTimeout(async () => {
     sseTimer = null;
-    if (document.hidden || document.querySelector('.modal-back')) return;
+    if (isScrollActive() || document.hidden || document.querySelector('.modal-back')) return;
     ssePending = false;
     sseRefreshing = true;
     try {
       const h = location.hash.split('?')[0] || '#/';
       await Promise.all([refreshPriceBadge(), route(app.dataset.loadedRoute === h)]);
     } finally {
+      if (isScrollActive()) ssePending = true;
       sseRefreshing = false;
+      flushPortfolio();
       scheduleLiveRefresh();
     }
   }, 250);
@@ -368,10 +386,8 @@ connectSse({
     if (document.hidden || !getAuthed()) return;
     const frame = data as PortfolioFrame;
     if (!Array.isArray(frame?.assets) || !Array.isArray(frame?.wallet_tokens)) return;
-    rememberApiSnapshot('/api/portfolio', frame);
-    const hash = location.hash.split('?')[0] || '#/';
-    if (hash === '#/portofolio') applyLivePortfolio(app, frame);
-    else if (hash === '#/') applyLiveHome(app, frame);
+    pendingPortfolio = frame;
+    flushPortfolio();
   },
 });
 document.addEventListener('modal:closed', scheduleLiveRefresh);

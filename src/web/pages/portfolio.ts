@@ -1,5 +1,6 @@
 import { api } from '../lib/api.js';
 import { patchContent, renderContent } from '../lib/patchContent.js';
+import { isScrollActive } from '../lib/scrollActivity.js';
 import { formatIdr, formatPct, formatUsd, timeAgo } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { coinAvatar } from '../lib/coinIcons.js';
@@ -334,7 +335,7 @@ export async function renderPortfolio(el: HTMLElement, background = false): Prom
     { key: 'orders', label: 'Limit Order', count: defiList.length },
   ];
   if (renderId !== portfolioRenderId) return;
-  if (background && (location.hash !== routeHash || document.querySelector('.modal-back'))) return;
+  if (background && (isScrollActive() || location.hash !== routeHash || document.querySelector('.modal-back'))) return;
   renderContent(el, `<div class="portfolio-workspace">
     <div class="portfolio-actions"><span class="muted">Ringkasan seluruh investasi</span><div class="row">${buttons}</div></div>
     ${summaryCard}

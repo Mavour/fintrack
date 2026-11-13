@@ -1,5 +1,6 @@
 import { api } from '../lib/api.js';
 import { renderContent } from '../lib/patchContent.js';
+import { isScrollActive } from '../lib/scrollActivity.js';
 import { formatIdr, formatCompactIdr, formatPct } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { wealthTrendCard } from '../lib/trend.js';
@@ -121,7 +122,7 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
     sub: 'Total kas + investasi',
   });
 
-  if (background && (location.hash !== routeHash || document.querySelector('.modal-back'))) return;
+  if (background && (isScrollActive() || location.hash !== routeHash || document.querySelector('.modal-back'))) return;
   let html: string;
   if (isDesktop()) {
     html = `${intro}<div class="grid12 home-grid home-balanced">

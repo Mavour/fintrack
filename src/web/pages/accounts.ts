@@ -1,5 +1,6 @@
 import { api, isTemporaryApiError } from '../lib/api.js';
 import { renderContent } from '../lib/patchContent.js';
+import { isScrollActive } from '../lib/scrollActivity.js';
 import { formatIdr, timeAgo } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal } from '../components/modal.js';
@@ -92,7 +93,7 @@ async function renderAccountsInner(el: HTMLElement, background: boolean): Promis
     if (background) throw error;
     wallets = [];
   }
-  if (background && (location.hash !== routeHash || document.querySelector('.modal-back'))) return;
+  if (background && (isScrollActive() || location.hash !== routeHash || document.querySelector('.modal-back'))) return;
   renderContent(el, `
   <div class="card">
     <div class="between"><div><span class="eyebrow">Total Kas</span><div class="big-num" style="font-size:26px">${isPrivat() ? '••••••' : formatIdr(total)}</div></div>
