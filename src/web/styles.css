@@ -465,28 +465,35 @@ table.data tr.clickable:hover td { background: var(--primary-soft); }
   border-radius: 28px 28px 0 0; padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
   border-top: 4px solid var(--primary);
 }
-.modal-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px; margin: -3px; }
+.modal-header { flex: none; min-height: 36px; margin-bottom: 16px; gap: 16px; }
+.modal-header > strong { font-size: 17px; line-height: 1.4; }
+.modal-header .icon-btn { width: 34px; height: 34px; min-height: 34px; padding: 7px; border-radius: 10px; flex: none; }
+.modal-header .icon-btn svg { width: 18px; height: 18px; }
+.modal-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px 14px 4px 4px; margin: -4px -6px -4px -4px; }
 @supports not selector(::-webkit-scrollbar) {
   :is(.modal-scroll, .drawer, .badge-pop-body),
   :is(.modal, .drawer, .badge-pop-body) * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, var(--primary) 40%, var(--border)) transparent;
+    scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
   }
 }
 :is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar,
-:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar { width: 6px; height: 6px; }
+:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar { width: 5px; height: 5px; }
 :is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar-track,
 :is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-track { background: transparent; }
 :is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar-thumb,
-:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--primary) 40%, var(--border)); border-radius: 99px; }
+:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 99px; }
 :is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar-button,
 :is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-button { display: none; }
 .modal::before {
   content: ''; display: block; width: 44px; height: 5px; border-radius: 99px;
   background: linear-gradient(90deg, var(--primary), var(--pink), var(--amber)); margin: 0 auto 12px;
 }
-.modal label { display: block; font-size: 13px; color: var(--muted); font-weight: 700; margin-top: 10px; }
+.modal label { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin-top: 16px; }
+.modal [data-body] > label:first-child { margin-top: 0; }
 .modal input, .modal select { width: 100%; margin-top: 4px; }
+.modal input[type="datetime-local"] { color-scheme: light; }
+[data-theme="dark"] .modal input[type="datetime-local"] { color-scheme: dark; }
 .modal .btn-primary { width: 100%; margin-top: 16px; }
 
 /* ---------- skeleton ---------- */
