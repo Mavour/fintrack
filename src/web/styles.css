@@ -460,10 +460,27 @@ table.data tr.clickable:hover td { background: var(--primary-soft); }
   display: flex; align-items: flex-end; justify-content: center;
 }
 .modal {
-  background: #fff; width: 100%; max-height: 92dvh; overflow-y: auto;
+  background: #fff; width: 100%; max-height: 92dvh; overflow: hidden;
+  display: flex; flex-direction: column;
   border-radius: 28px 28px 0 0; padding: 18px 18px calc(20px + env(safe-area-inset-bottom));
   border-top: 4px solid var(--primary);
 }
+.modal-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 3px; margin: -3px; }
+@supports not selector(::-webkit-scrollbar) {
+  :is(.modal-scroll, .drawer, .badge-pop-body),
+  :is(.modal, .drawer, .badge-pop-body) * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--primary) 40%, var(--border)) transparent;
+  }
+}
+:is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar,
+:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar { width: 6px; height: 6px; }
+:is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar-track,
+:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-track { background: transparent; }
+:is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar-thumb,
+:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--primary) 40%, var(--border)); border-radius: 99px; }
+:is(.modal-scroll, .drawer, .badge-pop-body)::-webkit-scrollbar-button,
+:is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-button { display: none; }
 .modal::before {
   content: ''; display: block; width: 44px; height: 5px; border-radius: 99px;
   background: linear-gradient(90deg, var(--primary), var(--pink), var(--amber)); margin: 0 auto 12px;
@@ -905,7 +922,7 @@ table.data td { padding-top: 16px; padding-bottom: 16px; }
   #bottomnav a { min-width: 0; min-height: 48px; gap: 4px; border-radius: 12px; font-size: 10px; font-weight: 550; color: var(--muted); }
   #bottomnav a.active { font-weight: 650; }
   #bottomnav svg { width: 21px; height: 21px; }
-  .modal { max-height: calc(100dvh - 24px); overflow-y: auto; border-radius: 20px 20px 0 0; }
+  .modal { max-height: calc(100dvh - 24px); border-radius: 20px 20px 0 0; }
 }
 @media (max-width: 359px) {
   #app, #pagehead { padding-left: 12px; padding-right: 12px; }

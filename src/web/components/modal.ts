@@ -8,8 +8,9 @@ export function openModal(title: string, bodyHtml: string): { close: () => void;
   const back = document.createElement('div');
   back.className = 'modal-back';
   back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${escAttr(title)}">
+    <div class="modal-scroll">
     <div class="between"><strong style="font-size:17px">${escHtml(title)}</strong><button class="btn-ghost icon-btn" data-x aria-label="Tutup">${icons.close}</button></div>
-    <div data-body>${bodyHtml}</div></div>`;
+    <div data-body>${bodyHtml}</div></div></div>`;
   root.appendChild(back);
   const previouslyFocused = document.activeElement as HTMLElement | null;
   const close = () => {
