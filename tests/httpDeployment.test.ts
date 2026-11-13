@@ -51,6 +51,35 @@ describe('HTTP IP and HTTPS deployments', () => {
     expect(response.headers['strict-transport-security']).toContain('max-age=31536000');
   });
 
+  it.each(['http', 'https'])('keeps the %s production session usable through login, password rotation and logout', async protocol => {
+    const headers: Record<string, string> = { host: '203.0.113.10:3100' };
+    if (protocol === 'https') headers['x-forwarded-proto'] = protocol;
+    const cookieFrom = (response: Awaited<ReturnType<typeof app.inject>>): string => {
+      expect(response.statusCode).toBe(200);
+      const cookie = String(response.headers['set-cookie']);
+      expect(/; Secure(?:;|$)/i.test(cookie)).toBe(protocol === 'https');
+      expect(cookie).toContain('HttpOnly');
+      expect(cookie).toContain('SameSite=Strict');
+      expect(cookie).toContain('Path=/');
+      return cookie.split(';')[0];
+    };
+    const post = (url: string, payload: object, cookie = '') => app.inject({
+      method: 'POST', url, headers: { ...headers, cookie }, payload,
+    });
+    const cookie = cookieFrom(await post('/api/auth/login', { password: 'test-password' }));
+    expect((await app.inject({ url: '/api/auth/me', headers: { ...headers, cookie } })).json().authenticated).toBe(true);
+    expect((await app.inject({ url: '/api/accounts', headers: { ...headers, cookie } })).statusCode).toBe(200);
+    const rotated = cookieFrom(await post('/api/auth/change-password', { oldPassword: 'test-password', newPassword: 'next-password' }, cookie));
+    expect((await app.inject({ url: '/api/accounts', headers: { ...headers, cookie } })).statusCode).toBe(401);
+    expect((await app.inject({ url: '/api/accounts', headers: { ...headers, cookie: rotated } })).statusCode).toBe(200);
+    const restored = cookieFrom(await post('/api/auth/change-password', { oldPassword: 'next-password', newPassword: 'test-password' }, rotated));
+    cookieFrom(await post('/api/auth/logout-all', {}, restored));
+    expect((await app.inject({ url: '/api/accounts', headers: { ...headers, cookie: restored } })).statusCode).toBe(401);
+    const again = cookieFrom(await post('/api/auth/login', { password: 'test-password' }));
+    cookieFrom(await post('/api/auth/logout', {}, again));
+    expect((await app.inject({ url: '/api/auth/me', headers: { ...headers, cookie: again } })).json().authenticated).toBe(false);
+  });
+
   it.runIf(fs.existsSync('dist/public/index.html'))('serves all built entry assets over HTTP', async () => {
     const headers = { host: '203.0.113.10:3100' };
     const page = await app.inject({ url: '/', headers });

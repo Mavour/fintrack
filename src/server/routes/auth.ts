@@ -70,7 +70,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database):
     reply.setCookie('session', token, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
+      secure: req.protocol === 'https',
       path: '/',
       maxAge: SESSION_MAX_AGE_SEC,
     });
@@ -83,7 +83,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database):
       path: '/',
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
+      secure: req.protocol === 'https',
     });
     return { ok: true };
   });
@@ -95,7 +95,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database):
       path: '/',
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
+      secure: req.protocol === 'https',
     });
     return { ok: true };
   });
@@ -110,7 +110,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database):
     reply.setCookie('session', token, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
+      secure: req.protocol === 'https',
       path: '/',
       maxAge: SESSION_MAX_AGE_SEC,
     });
@@ -131,7 +131,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database):
     reply.setCookie('session', token, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
+      secure: req.protocol === 'https',
       path: '/',
       maxAge: SESSION_MAX_AGE_SEC,
     });
