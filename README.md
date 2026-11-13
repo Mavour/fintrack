@@ -71,7 +71,18 @@ sudo systemctl reload caddy
 (crontab -l; echo "0 2 * * * /opt/dompet/scripts/backup.sh") | crontab -
 ```
 
-Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
+Update: `git pull && npm ci && npm run build && pm2 startOrRestart ecosystem.config.cjs --only dompet-saya --update-env && pm2 save`.
+
+Jika Node dikelola melalui NVM, jalankan `nvm install && nvm use` dari folder
+proyek sebelum `npm ci`, build, dan perintah PM2. File `.nvmrc` memilih Node 22;
+`nvm alias default 22` menjadikannya default untuk terminal baru. Modul native
+seperti `better-sqlite3` harus dipasang ulang dengan `npm ci` setelah berganti
+versi utama Node. Konfigurasi PM2 memakai path Node yang menjalankan perintah
+tersebut dan direktori proyek sebagai working directory.
+
+`pm2 startup` menampilkan perintah `sudo` yang perlu dijalankan agar aplikasi
+hidup kembali setelah reboot. Setelah mengganti versi Node, perbarui startup
+service PM2 sesuai petunjuknya agar tidak menunjuk binary Node yang lama.
 
 Data bank/investasi dipindahkan menggunakan [seed privat](docs/portfolio-restore.md).
 Snapshot berada di `data/` dan tidak ikut GitHub; salin file tersebut secara privat

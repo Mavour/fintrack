@@ -2,6 +2,8 @@ module.exports = {
   apps: [
     {
       name: 'dompet-saya',
+      cwd: __dirname,
+      interpreter: process.execPath,
       script: 'dist/server/index.js',
       instances: 1,
       exec_mode: 'fork',

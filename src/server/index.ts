@@ -12,6 +12,12 @@ import { startLiveCrypto } from './services/liveCrypto.js';
 import { getUnifiedPortfolio } from './services/portfolioService.js';
 import { emitLivePortfolio, sseClientCount } from './services/sse.js';
 
+// Initialize cleanup state before startup can fail (including native DB loading).
+let app: Awaited<ReturnType<typeof buildApp>>['app'] | undefined;
+let stopLiveCrypto: (() => void) | undefined;
+let dormApi: Awaited<ReturnType<typeof startDormApi>> | undefined;
+let shuttingDown = false;
+
 // Backend tahan banting: logging terstruktur + graceful shutdown (PM2 auto-restart).
 process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'unhandledRejection');
@@ -21,8 +27,10 @@ process.on('uncaughtException', (err) => {
   shutdown(1);
 });
 
-const { app, db, config } = await buildApp();
-const stopLiveCrypto = startLiveCrypto(() => {
+const built = await buildApp();
+app = built.app;
+const { db, config } = built;
+stopLiveCrypto = startLiveCrypto(() => {
   if (sseClientCount() > 0) emitLivePortfolio(getUnifiedPortfolio(db, undefined, { readOnly: true }));
 });
 
@@ -61,7 +69,6 @@ cron.schedule('0 2 * * *', () => {
 await app.listen({ port: config.port, host: config.host });
 logger.info(`Dompet Saya listening on ${config.host}:${config.port}`);
 
-let dormApi: Awaited<ReturnType<typeof startDormApi>> | undefined;
 try {
   const options = readDormApiOptions();
   if (options.enabled) {
@@ -73,18 +80,17 @@ try {
   logger.error('Agent Dorm status API unavailable; check STATUS_API configuration. Fintrack continues.');
 }
 
-let shuttingDown = false;
 function shutdown(code: number): void {
   if (shuttingDown) return;
   shuttingDown = true;
   try {
     stopTierScheduler();
-    stopLiveCrypto();
+    stopLiveCrypto?.();
     cron.getTasks().forEach((t) => t.stop());
   } catch {
     // Best-effort.
   }
-  void Promise.allSettled([app.close(), dormApi?.close()]).finally(() => {
+  void Promise.allSettled([app?.close(), dormApi?.close()]).finally(() => {
     try {
       closeDatabase();
     } catch {
