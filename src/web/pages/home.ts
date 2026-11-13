@@ -1,5 +1,4 @@
 import { api } from '../lib/api.js';
-import { renderContent } from '../lib/patchContent.js';
 import { isScrollActive } from '../lib/scrollActivity.js';
 import { formatIdr, formatCompactIdr, formatPct } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
@@ -15,21 +14,49 @@ import type { PortfolioFrame } from './portfolio.js';
 const show = (n: number) => (isPrivat() ? '••••••' : formatIdr(n));
 const showCompact = (n: number) => (isPrivat() ? '•••' : formatCompactIdr(n));
 
+function setText(node: Element | null, value: string): void {
+  if (!node || node.textContent === value) return;
+  if (node.childNodes.length === 1 && node.firstChild?.nodeType === 3) node.firstChild.nodeValue = value;
+  else node.textContent = value;
+}
+
 export function applyLiveHome(el: HTMLElement, frame: PortfolioFrame): void {
   const card = el.querySelector<HTMLElement>('[data-live-cash]');
   if (!card) return;
   const cash = Number(card.dataset.liveCash);
   const wealth = cash + frame.total_value_idr;
   const amount = card.querySelector('.big-num');
-  if (amount) amount.textContent = show(wealth);
+  setText(amount, show(wealth));
   const pill = card.querySelector('.pill');
-  if (pill) { pill.textContent = `P/L ${isPrivat() ? '•••' : formatIdr(frame.floating_pl_idr)}`; pill.className = `pill ${frame.floating_pl_idr >= 0 ? 'up' : 'down'}`; }
+  if (pill) { setText(pill, `P/L ${isPrivat() ? '•••' : formatIdr(frame.floating_pl_idr)}`); pill.className = `pill ${frame.floating_pl_idr >= 0 ? 'up' : 'down'}`; }
   el.querySelectorAll<HTMLElement>('[data-live-allocation]').forEach((tile) => {
     const label = tile.dataset.liveAllocation!;
     const value = label === 'Kas' ? cash : frame.by_type[label === 'Crypto' ? 'crypto' : label === 'Saham' ? 'saham' : 'reksadana'] ?? 0;
     const amount = tile.querySelector('.t-val'), percent = tile.querySelector('.t-pct');
-    if (amount) amount.textContent = showCompact(value);
-    if (percent) percent.textContent = `${((value / (wealth || 1)) * 100).toFixed(0)}% dari total`;
+    setText(amount, showCompact(value));
+    setText(percent, `${((value / (wealth || 1)) * 100).toFixed(0)}% dari total`);
+  });
+  const allocation: Record<string, number> = { Kas: cash, Crypto: frame.by_type.crypto ?? 0, Saham: frame.by_type.saham ?? 0, Reksadana: frame.by_type.reksadana ?? 0 };
+  card.querySelectorAll<HTMLElement>('.alloc-bar > span[title]').forEach(segment => {
+    segment.style.width = `${(((allocation[segment.title] ?? 0) / (wealth || 1)) * 100).toFixed(1)}%`;
+  });
+  const chart = el.querySelector('.allocation-chart');
+  let offset = 0;
+  chart?.querySelectorAll('svg circle').forEach(circle => {
+    const title = circle.querySelector('title');
+    if (!title) return;
+    const label = title.textContent?.split(':')[0] ?? '';
+    const value = allocation[label] ?? 0;
+    const circumference = 2 * Math.PI * Number(circle.getAttribute('r'));
+    const fraction = value / (wealth || 1);
+    circle.setAttribute('stroke-dasharray', `${(fraction * circumference).toFixed(1)} ${((1 - fraction) * circumference).toFixed(1)}`);
+    circle.setAttribute('stroke-dashoffset', (-offset * circumference).toFixed(1));
+    offset += fraction;
+    setText(title, `${label}: ${show(value)}`);
+  });
+  chart?.querySelectorAll('svg + div > .row').forEach(row => {
+    const label = row.children[1]?.textContent ?? '';
+    setText(row.querySelector('strong'), `${(((allocation[label] ?? 0) / (wealth || 1)) * 100).toFixed(0)}%`);
   });
   el.querySelectorAll<HTMLElement>('[data-watch-symbol]').forEach((watch) => {
     const symbol = watch.dataset.watchSymbol;
@@ -37,7 +64,13 @@ export function applyLiveHome(el: HTMLElement, frame: PortfolioFrame): void {
     const w = frame.wallet_tokens.find((w) => w.symbol === symbol);
     const value = a?.current_value_idr ?? w?.value_idr;
     const price = watch.querySelector('.w-price');
-    if (price && value != null) price.textContent = show(value);
+    if (value != null) setText(price, show(value));
+    const pl = a?.pl_percent ?? w?.pl_percent;
+    const plNode = watch.querySelector('.muted > span');
+    if (plNode && pl != null) {
+      setText(plNode, `${isPrivat() ? '•••' : formatPct(pl)} P/L`);
+      plNode.className = pl >= 0 ? 'pos' : 'neg';
+    }
   });
 }
 
@@ -52,14 +85,23 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
       expense_by_category: Array<{ category: string; total_idr: number }>;
     }>,
     api.get('/api/accounts') as Promise<Array<{ id: number; name: string; type: string; balance_idr: number }>>,
-    api.get('/api/transactions?limit=5') as Promise<
+    (background ? Promise.resolve([]) : api.get('/api/transactions?limit=5')) as Promise<
       Array<{ category: string; note: string; amount_idr: number; occurred_at: string; kind: string }>
     >,
-    api.get('/api/portfolio').catch(() => null) as Promise<{
-      assets: Array<{ symbol: string; type: string; current_price_idr: number | null; current_value_idr: number | null; current_price_usd: number | null; pl_percent: number | null }>;
-      wallet_tokens?: Array<{ symbol: string; value_idr: number | null; price_idr: number | null; pl_percent: number | null; mint: string | null; icon: string | null }>;
-    } | null>,
+    api.get('/api/portfolio').catch(() => null) as Promise<PortfolioFrame | null>,
   ]);
+
+  if (background) {
+    if (!pf || isScrollActive() || location.hash !== routeHash || document.querySelector('.modal-back')) return;
+    const card = el.querySelector<HTMLElement>('[data-live-cash]');
+    if (card) card.dataset.liveCash = String(dash.allocation.find(a => a.label === 'Kas')?.value_idr ?? 0);
+    applyLiveHome(el, pf);
+    el.querySelectorAll<HTMLElement>('[data-acc]').forEach(node => {
+      const account = accounts.find(a => String(a.id) === node.dataset.acc);
+      if (account) setText(node.querySelector('.a-bal'), show(account.balance_idr));
+    });
+    return;
+  }
 
   const alloc = dash.allocation;
   const total = alloc.reduce((s, a) => s + a.value_idr, 0) || 1;
@@ -122,7 +164,6 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
     sub: 'Total kas + investasi',
   });
 
-  if (background && (isScrollActive() || location.hash !== routeHash || document.querySelector('.modal-back'))) return;
   let html: string;
   if (isDesktop()) {
     html = `${intro}<div class="grid12 home-grid home-balanced">
@@ -142,7 +183,7 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
       <div class="card"><div class="between"><strong>Transaksi terkini</strong><a href="#/transaksi">Semua</a></div>${recentTx(txs)}</div>`;
   }
 
-  renderContent(el, html, background);
+  el.innerHTML = html;
 
   el.querySelectorAll('[data-q]').forEach(
     (b) => ((b as HTMLElement).onclick = () => (location.hash = `#/transaksi?baru=${(b as HTMLElement).dataset.q}`)),
