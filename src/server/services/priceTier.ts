@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Decimal } from 'decimal.js';
 import { providerFetch, throwForStatus } from '../providers/walletTypes.js';
 import { logger } from '../logger.js';
+import { NATIVE_WRAPPED } from '../providers/evmExplorer.js';
 
 /**
  * Tingkat HARGA: perbarui harga token yang sudah dikenal lalu hitung ulang
@@ -32,6 +33,8 @@ export const CG_PLATFORMS: Record<string, string> = {
 
 /** DexScreener chain id per chain_id internal (fallback saat CoinGecko 429). */
 const DEX_CHAINS: Record<string, string> = {
+  robinhood: 'robinhood',
+  elysium: 'elysium',
   eth: 'ethereum',
   arb: 'arbitrum',
   base: 'base',
@@ -45,6 +48,31 @@ const CgPriceRes = z.record(z.object({ usd: z.number().optional() }).passthrough
 function cgHeaders(): Record<string, string> {
   const key = process.env.COINGECKO_API_KEY ?? '';
   return key ? { 'x-cg-demo-api-key': key } : {};
+}
+
+/** Contract-scoped market prices, including quote tokens such as USDG. */
+export async function fetchDexPrices(chain: string, contracts: string[]): Promise<Map<string, number>> {
+  const res = await providerFetch(`https://api.dexscreener.com/tokens/v1/${DEX_CHAINS[chain]}/${contracts.join(',')}`,
+    { headers: { Accept: 'application/json' } }, 12_000);
+  throwForStatus(res, 'dexscreener');
+  const pairs = await res.json() as Array<{ chainId?: string; baseToken?: { address?: string }; quoteToken?: { address?: string };
+    priceUsd?: string; priceNative?: string; liquidity?: { usd?: number } }>;
+  if (!Array.isArray(pairs)) throw new Error('DexScreener: respons harga tidak valid');
+  const prices = new Map<string, number>();
+  const wanted = new Set(contracts.map((c) => c.toLowerCase()));
+  for (const p of pairs.filter((p) => p.chainId === DEX_CHAINS[chain])
+    .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))) {
+    const base = p.baseToken?.address?.toLowerCase();
+    const quote = p.quoteToken?.address?.toLowerCase();
+    const usd = Number(p.priceUsd);
+    const ratio = Number(p.priceNative);
+    if (!Number.isFinite(usd) || usd <= 0) continue;
+    if (base && wanted.has(base) && !prices.has(base)) prices.set(base, usd);
+    const quoteUsd = usd / ratio;
+    if (quote && wanted.has(quote) && !prices.has(quote) && Number.isFinite(quoteUsd) && quoteUsd > 0)
+      prices.set(quote, quoteUsd);
+  }
+  return prices;
 }
 
 export interface PriceTierResult {
@@ -73,7 +101,7 @@ export async function refreshWalletPrices(db: Database.Database): Promise<PriceT
     if (r.chain_id === 'solana' && mint) {
       if (!mintToIds.has(mint)) mintToIds.set(mint, []);
       mintToIds.get(mint)!.push(r.id);
-    } else if (tokenId && tokenId.startsWith('0x') && CG_PLATFORMS[r.chain_id]) {
+    } else if (tokenId && tokenId.startsWith('0x') && (CG_PLATFORMS[r.chain_id] || DEX_CHAINS[r.chain_id])) {
       const key = `${r.chain_id}:${tokenId.toLowerCase()}`;
       if (!contractToIds.has(key)) contractToIds.set(key, { ids: [], chain: r.chain_id });
       contractToIds.get(key)!.ids.push(r.id);
@@ -82,22 +110,38 @@ export async function refreshWalletPrices(db: Database.Database): Promise<PriceT
 
   const prices = new Map<number, number>();
 
-  // Native HYPE on Elysium has no ERC-20 contract. Price by the explicit
+  // Native assets have no ERC-20 contract. Price by the explicit
   // canonical asset id, never by a ticker that another token can impersonate.
-  const hypeIds = rows.filter((r) => {
-    try { return r.chain_id === 'elysium' && JSON.parse(r.meta).coingecko_id === 'hyperliquid'; }
-    catch { return false; }
-  }).map((r) => r.id);
-  if (hypeIds.length) {
+  const nativeAssets: Record<string, string> = { elysium: 'hyperliquid', robinhood: 'ethereum' };
+  const nativeIds = new Map<string, number[]>();
+  for (const r of rows) {
     try {
-      const res = await providerFetch('https://api.coingecko.com/api/v3/simple/price?ids=hyperliquid&vs_currencies=usd', { headers: cgHeaders() });
-      throwForStatus(res, 'coingecko-hype');
-      const json = await res.json() as { hyperliquid?: { usd?: number } };
-      const price = json.hyperliquid?.usd;
-      if (typeof price === 'number' && Number.isFinite(price) && price > 0)
-        for (const id of hypeIds) prices.set(id, price);
+      const asset = nativeAssets[r.chain_id];
+      const meta = JSON.parse(r.meta);
+      if (!asset || meta.token_id || meta.coingecko_id !== asset) continue;
+      if (!nativeIds.has(asset)) nativeIds.set(asset, []);
+      nativeIds.get(asset)!.push(r.id);
+      // Canonical WETH/USD is also an ETH price source when the simple-price
+      // endpoint is rate-limited. This does not change the token's chain.
+      if (asset === 'ethereum') {
+        const key = `eth:${NATIVE_WRAPPED.eth.toLowerCase()}`;
+        if (!contractToIds.has(key)) contractToIds.set(key, { ids: [], chain: 'eth' });
+        contractToIds.get(key)!.ids.push(r.id);
+      }
+    } catch { /* Invalid metadata is not a price identity. */ }
+  }
+  if (nativeIds.size) {
+    try {
+      const res = await providerFetch(`https://api.coingecko.com/api/v3/simple/price?ids=${[...nativeIds.keys()].join(',')}&vs_currencies=usd`, { headers: cgHeaders() });
+      throwForStatus(res, 'coingecko-native');
+      const json = await res.json() as Record<string, { usd?: number }>;
+      for (const [asset, ids] of nativeIds) {
+        const price = json[asset]?.usd;
+        if (typeof price === 'number' && Number.isFinite(price) && price > 0)
+          for (const id of ids) prices.set(id, price);
+      }
     } catch (e) {
-      logger.warn({ err: (e as Error).message }, 'harga native HYPE Elysium tertunda');
+      logger.warn({ err: (e as Error).message }, 'harga native Elysium/Robinhood tertunda');
     }
   }
 
@@ -127,6 +171,7 @@ export async function refreshWalletPrices(db: Database.Database): Promise<PriceT
   // EVM: satu panggilan CoinGecko per chain (hemat rate limit free ~5–15/mnt).
   const byChain = new Map<string, string[]>();
   for (const [key, v] of contractToIds) {
+    if (v.ids.every((id) => prices.has(id))) continue;
     const contract = key.split(':')[1];
     if (!byChain.has(v.chain)) byChain.set(v.chain, []);
     byChain.get(v.chain)!.push(contract);
@@ -134,6 +179,7 @@ export async function refreshWalletPrices(db: Database.Database): Promise<PriceT
   const cgPriced = new Set<number>();
   for (const [chain, contractsAll] of byChain) {
     const platform = CG_PLATFORMS[chain];
+    if (!platform) continue;
     for (let i = 0; i < contractsAll.length; i += 50) {
       const contracts = contractsAll.slice(i, i + 50);
       try {
@@ -180,23 +226,10 @@ export async function refreshWalletPrices(db: Database.Database): Promise<PriceT
       const batch = uniq.slice(i, i + 30);
       try {
         const contracts = [...new Set(batch.map((x) => x.contract))];
-        const res = await providerFetch(
-          `https://api.dexscreener.com/tokens/v1/${DEX_CHAINS[chain]}/${contracts.join(',')}`,
-          { headers: { Accept: 'application/json' } },
-          12_000,
-        );
-        throwForStatus(res, 'dexscreener');
-        const pairs = (await res.json()) as Array<{ baseToken?: { address?: string }; priceUsd?: string }>;
-        const seen = new Set<string>();
-        for (const p of Array.isArray(pairs) ? pairs : []) {
-          const addr = p.baseToken?.address?.toLowerCase();
-          if (!addr || seen.has(addr)) continue;
-          const usd = Number(p.priceUsd);
-          if (!Number.isFinite(usd) || usd <= 0) continue;
-          seen.add(addr);
-          const item = batch.find((x) => x.contract.toLowerCase() === addr);
-          for (const id of item?.ids ?? []) prices.set(id, usd);
-        }
+        const quoted = await fetchDexPrices(chain, contracts);
+        for (const item of batch)
+          if (quoted.has(item.contract.toLowerCase()))
+            for (const id of item.ids) prices.set(id, quoted.get(item.contract.toLowerCase())!);
       } catch (e) {
         logger.warn({ chain, err: (e as Error).message }, 'dexscreener fallback gagal, harga lama dipertahankan');
       }

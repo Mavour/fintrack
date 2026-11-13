@@ -39,7 +39,8 @@ if (victims.length === 0) {
 } else {
   const tx = db.transaction(() => {
     for (const s of victims) {
-      db.prepare('DELETE FROM assets WHERE symbol = ?').run(s);
+      const fp = DEMO_FPS.find((d) => d.symbol === s);
+      db.prepare('DELETE FROM assets WHERE symbol = ? AND qty = ? AND avg_buy_price_idr = ?').run(s, fp.qty, fp.avg);
       db.prepare('DELETE FROM price_cache WHERE symbol = ?').run(s);
       db.prepare('DELETE FROM price_history WHERE symbol = ?').run(s);
     }

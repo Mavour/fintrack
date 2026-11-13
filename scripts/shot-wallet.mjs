@@ -27,7 +27,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const server = spawn('node', ['dist/server/index.js'], {
   cwd: new URL('../', import.meta.url).pathname.replace(/^\//, ''),
-  env: { ...process.env, PORT: String(PORT), DATABASE_PATH: DB, APP_PASSWORD: '', NODE_ENV: 'production', LOG_LEVEL: 'warn' },
+  env: { ...process.env, PORT: String(PORT), DATABASE_PATH: DB, APP_PASSWORD: 'demo-shot-password', NODE_ENV: 'production', LOG_LEVEL: 'warn' },
   stdio: 'pipe',
 });
 server.stdout.on('data', (d) => process.stdout.write(`[srv] ${d}`));

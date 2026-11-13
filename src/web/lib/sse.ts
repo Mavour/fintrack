@@ -9,6 +9,7 @@ export type SseScope = 'price' | 'lp' | 'solana' | 'evm';
 interface SseOpts {
   onSync: (scopes: SseScope[]) => void;
   onState?: (connected: boolean) => void;
+  onPortfolio?: (data: unknown) => void;
 }
 
 export function connectSse(opts: SseOpts): () => void {
@@ -43,6 +44,14 @@ export function connectSse(opts: SseOpts): () => void {
       startPollFallback();
       return;
     }
+    es.onopen = () => {
+      attempts = 0;
+      clearPoll();
+      opts.onState?.(true);
+      // Catch updates missed while disconnected, even if prices now stay flat.
+      lastDataAt = Date.now();
+      opts.onSync(['price', 'lp', 'solana', 'evm']);
+    };
     es.addEventListener('sync:done', (ev) => {
       attempts = 0;
       clearPoll();
@@ -55,17 +64,23 @@ export function connectSse(opts: SseOpts): () => void {
         // Payload rusak diabaikan — data terakhir tetap tampil.
       }
     });
+    es.addEventListener('portfolio:live', (ev) => {
+      lastDataAt = Date.now();
+      try { opts.onPortfolio?.(JSON.parse((ev as MessageEvent).data)); }
+      catch { /* Keep the last valid screen if a frame is malformed. */ }
+    });
     es.onerror = () => {
       closeEs();
       opts.onState?.(false);
       if (disposed) return;
       attempts += 1;
+      // Poll fallback hanya bila sudah 2x gagal (hindari fetch ganda dengan SSE).
+      if (attempts >= 2) startPollFallback();
       const backoff = Math.min(30_000, 1000 * 2 ** Math.min(attempts, 5));
       setTimeout(() => {
         if (!disposed && !document.hidden) open();
         else if (!disposed) startPollFallback();
       }, backoff);
-      startPollFallback();
     };
   };
 

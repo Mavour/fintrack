@@ -18,6 +18,8 @@ const ListQuery = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
 });
 
+const IdParam = z.object({ id: z.coerce.number().int().positive() });
+
 export function registerTransactionRoutes(app: FastifyInstance, db: Database.Database): void {
   app.get('/api/transactions', async (req) => {
     const q = ListQuery.parse((req as { query: unknown }).query);
@@ -35,7 +37,8 @@ export function registerTransactionRoutes(app: FastifyInstance, db: Database.Dat
 
   app.patch('/api/transactions/:id', async (req: FastifyRequest<{ Params: { id: string } }>, reply) => {
     try {
-      return updateTransaction(db, Number(req.params.id), UpdateTxSchema.parse(req.body));
+      const params = IdParam.parse(req.params);
+      return updateTransaction(db, params.id, UpdateTxSchema.parse(req.body));
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       return reply.code(err.statusCode ?? 400).send({ error: err.message ?? 'Update failed' });
@@ -44,7 +47,8 @@ export function registerTransactionRoutes(app: FastifyInstance, db: Database.Dat
 
   app.delete('/api/transactions/:id', async (req: FastifyRequest<{ Params: { id: string } }>, reply) => {
     try {
-      deleteTransaction(db, Number(req.params.id));
+      const params = IdParam.parse(req.params);
+      deleteTransaction(db, params.id);
       return { ok: true };
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };

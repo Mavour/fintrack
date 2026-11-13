@@ -4,7 +4,7 @@ import { BinanceProvider } from './binance.js';
 import { JupiterPriceProvider } from './jupiterPrice.js';
 import { DexScreenerPriceProvider } from './dexscreener.js';
 import { GeckoTerminalPriceProvider } from './geckoterminal.js';
-import { YahooFinanceProvider, isMarketOpen } from './yahooFinance.js';
+import { YahooFinanceProvider } from './yahooFinance.js';
 import { createFxRateProvider } from './fxRate.js';
 import { storePrices } from './priceStore.js';
 import { logger } from '../logger.js';
@@ -63,10 +63,6 @@ export async function refreshCrypto(db: Database.Database, opts: OrchestratorOpt
 
 export async function refreshStocks(db: Database.Database, opts: OrchestratorOpts): Promise<void> {
   if (!opts.yahooEnabled) return;
-  if (!isMarketOpen()) {
-    logger.info('market closed, skipping stock refresh');
-    return;
-  }
   const symbols = (db.prepare(`SELECT symbol FROM assets WHERE type = 'saham'`).all() as Array<{ symbol: string }>).map(
     (r) => r.symbol,
   );

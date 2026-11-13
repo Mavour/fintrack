@@ -11,7 +11,9 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src tests --ext .ts",
+    "lint": "eslint scripts ecosystem.config.cjs eslint.config.js",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit",
+    "typecheck:web": "tsc -p tsconfig.json --noEmit",
     "format": "prettier --write \"src/**/*.{ts,css}\" \"tests/**/*.ts\"",
     "db:migrate": "node dist/server/db/migrate.js"
   },

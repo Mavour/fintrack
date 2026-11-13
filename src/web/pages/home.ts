@@ -1,12 +1,43 @@
 import { api } from '../lib/api.js';
-import { formatIdr, formatCompactIdr, formatPct, formatUsd } from '../lib/format.js';
+import { formatIdr, formatCompactIdr, formatPct } from '../lib/format.js';
+import { escAttr, escHtml } from '../lib/escape.js';
+import { wealthTrendCard } from '../lib/trend.js';
+import { bindTrendHover } from '../components/trendline.js';
 import { donut, PALETTE, ALLOC_COLORS } from '../components/donut.js';
 import { isDesktop, isPrivat } from '../lib/state.js';
 import { icons } from '../components/icons.js';
+import { coinAvatar } from '../lib/coinIcons.js';
 import { openAddAccountModal } from './accounts.js';
+import type { PortfolioFrame } from './portfolio.js';
 
 const show = (n: number) => (isPrivat() ? '••••••' : formatIdr(n));
 const showCompact = (n: number) => (isPrivat() ? '•••' : formatCompactIdr(n));
+
+export function applyLiveHome(el: HTMLElement, frame: PortfolioFrame): void {
+  const card = el.querySelector<HTMLElement>('[data-live-cash]');
+  if (!card) return;
+  const cash = Number(card.dataset.liveCash);
+  const wealth = cash + frame.total_value_idr;
+  const amount = card.querySelector('.big-num');
+  if (amount) amount.textContent = show(wealth);
+  const pill = card.querySelector('.pill');
+  if (pill) { pill.textContent = `P/L ${isPrivat() ? '•••' : formatIdr(frame.floating_pl_idr)}`; pill.className = `pill ${frame.floating_pl_idr >= 0 ? 'up' : 'down'}`; }
+  el.querySelectorAll<HTMLElement>('[data-live-allocation]').forEach((tile) => {
+    const label = tile.dataset.liveAllocation!;
+    const value = label === 'Kas' ? cash : frame.by_type[label === 'Crypto' ? 'crypto' : label === 'Saham' ? 'saham' : 'reksadana'] ?? 0;
+    const amount = tile.querySelector('.t-val'), percent = tile.querySelector('.t-pct');
+    if (amount) amount.textContent = showCompact(value);
+    if (percent) percent.textContent = `${((value / (wealth || 1)) * 100).toFixed(0)}% dari total`;
+  });
+  el.querySelectorAll<HTMLElement>('[data-watch-symbol]').forEach((watch) => {
+    const symbol = watch.dataset.watchSymbol;
+    const a = frame.assets.find((a) => a.symbol === symbol);
+    const w = frame.wallet_tokens.find((w) => w.symbol === symbol);
+    const value = a?.current_value_idr ?? w?.value_idr;
+    const price = watch.querySelector('.w-price');
+    if (price && value != null) price.textContent = show(value);
+  });
+}
 
 export async function renderHome(el: HTMLElement): Promise<void> {
   if (!el.innerHTML.trim()) el.innerHTML = `<div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>`.repeat(3);
@@ -23,6 +54,7 @@ export async function renderHome(el: HTMLElement): Promise<void> {
     >,
     api.get('/api/portfolio').catch(() => null) as Promise<{
       assets: Array<{ symbol: string; type: string; current_price_idr: number | null; current_value_idr: number | null; current_price_usd: number | null; pl_percent: number | null }>;
+      wallet_tokens?: Array<{ symbol: string; value_idr: number | null; price_idr: number | null; pl_percent: number | null; mint: string | null; icon: string | null }>;
     } | null>,
   ]);
 
@@ -33,32 +65,31 @@ export async function renderHome(el: HTMLElement): Promise<void> {
   const tileFor = (label: string, tileLabel: string) => {
     const a = alloc.find((x) => x.label === label);
     const v = a?.value_idr ?? 0;
-    return `<div class="tile"><div class="t-label">${tileLabel}</div><div class="t-val">${showCompact(v)}</div><div class="t-pct">${((v / total) * 100).toFixed(0)}%</div></div>`;
+    return `<div class="tile" data-live-allocation="${label}"><div class="t-label">${tileLabel}</div><div class="t-val">${showCompact(v)}</div><div class="t-pct">${((v / total) * 100).toFixed(0)}% dari total</div></div>`;
   };
 
   const accCards = accounts
     .map(
-      (a) => `<button class="acc-card" data-acc="${a.id}"><div class="a-name">${a.name}</div><div class="a-type">${a.type.replace('_', ' ')}</div><div class="a-bal">${show(a.balance_idr)}</div></button>`,
+      (a) => `<button class="acc-card" data-acc="${a.id}"><div class="a-name">${escHtml(a.name)}</div><div class="a-type">${escHtml(a.type.replace('_', ' '))}</div><div class="a-bal">${show(a.balance_idr)}</div></button>`,
     )
     .join('');
   const pl = dash.total_pl_idr;
 
+  const intro = `<div class="dashboard-intro"><div><div class="eyebrow">Ringkasan keuangan</div><h1>Lebih dekat dengan tujuan Anda.</h1><p>Kas, investasi, dan wallet dalam satu pandangan.</p></div><a class="overview-link" href="#/portofolio">Lihat portofolio <span aria-hidden="true">↗</span></a></div>`;
   const balanceCard = `
-    <div class="card">
-      <div class="networth-label">Halo</div>
-      <h2 style="font-size:19px">Total Kekayaan Bersih (Net Worth)</h2>
-      <div class="between" style="margin-top:10px"><span class="eyebrow">Saldo Konsolidasi</span></div>
+    <div class="card wealth-card" data-live-cash="${alloc.find((a) => a.label === 'Kas')?.value_idr ?? 0}">
+      <div class="between"><span class="networth-label">Total kekayaan bersih</span><span class="wealth-icon">${icons.wallet}</span></div>
       <div class="big-num">${show(dash.total_wealth_idr)}</div>
-      <span class="pill ${pl >= 0 ? 'up' : 'down'}">P/L ${isPrivat() ? '•••' : formatIdr(pl)}</span>
-      <div class="alloc-bar" role="img" aria-label="Alokasi aset">${sorted.map((a, i) => `<span style="width:${((a.value_idr / total) * 100).toFixed(1)}%;background:${ALLOC_COLORS[i % 4]}" title="${a.label}"></span>`).join('')}</div>
+      <div class="wealth-caption"><span class="pill ${pl >= 0 ? 'up' : 'down'}">P/L ${isPrivat() ? '•••' : formatIdr(pl)}</span><span>Berdasarkan modal tercatat</span></div>
+      <div class="alloc-bar" role="img" aria-label="Alokasi aset">${sorted.map((a, i) => `<span style="width:${((a.value_idr / total) * 100).toFixed(1)}%;background:${ALLOC_COLORS[i % 4]}" title="${escAttr(a.label)}"></span>`).join('')}</div>
       <div class="tiles">
-        ${tileFor('Saham', 'Saham')}${tileFor('Crypto', 'Crypto')}${tileFor('Reksadana', 'Reksadana')}${tileFor('Kas', 'Kas & Wallet')}
+        ${tileFor('Kas', 'Kas & akun')}${tileFor('Crypto', 'Crypto')}${tileFor('Saham', 'Saham')}${tileFor('Reksadana', 'Reksadana')}
       </div>
     </div>`;
 
   const qaTiles = isDesktop()
     ? ''
-    : `<div class="card"><div class="qa-grid">
+    : `<div class="card quick-actions-card"><div class="qa-grid">
       <button class="qa-tile" data-q="expense"><span class="qa-ic">${icons.minus}</span>Pengeluaran</button>
       <button class="qa-tile" data-q="income"><span class="qa-ic">${icons.plus}</span>Top Up</button>
       <button class="qa-tile" data-q="transfer"><span class="qa-ic">${icons.swap}</span>Transfer</button>
@@ -66,44 +97,41 @@ export async function renderHome(el: HTMLElement): Promise<void> {
 
   const sumberDana = `
     <div class="card">
-      <div class="between"><strong>Sumber Dana Aktif</strong><a href="#/akun">Kelola</a></div>
-      ${isDesktop() ? `<div class="acc-grid" style="margin-top:10px">${accCards || '<div class="empty">Belum ada akun</div>'}</div>`
-        : `<div class="hscroll">${accCards}<button class="acc-card acc-add" data-add-acc>+<span>Akun</span></button></div>`}
+      <div class="between"><div><span class="eyebrow">Dana tersedia</span><h2 class="section-heading">Akun &amp; saldo</h2></div><a class="text-link" href="#/akun">Kelola ↗</a></div>
+      <div class="acc-grid" style="margin-top:14px">${accCards || '<div class="empty">Belum ada akun</div>'}${isDesktop() ? '' : '<button class="acc-card acc-add" data-add-acc>+ Tambah akun</button>'}</div>
     </div>`;
 
-  const kpiCard = (label: string, value: number) =>
-    `<div class="card"><div class="eyebrow">${label}</div><div style="font-size:21px;font-weight:800">${show(value)}</div></div>`;
-  const val = (l: string) => alloc.find((a) => a.label === l)?.value_idr ?? 0;
+  const watchAssets = [
+    ...(pf?.assets ?? []).map((a) => ({ symbol: a.symbol, type: a.type, value: a.current_value_idr, pl: a.pl_percent, mint: null as string | null, icon: null as string | null })),
+    ...(pf?.wallet_tokens ?? []).map((a) => ({ symbol: a.symbol, type: 'wallet', value: a.value_idr, pl: a.pl_percent, mint: a.mint, icon: a.icon })),
+  ].sort((a, b) => (b.value ?? 0) - (a.value ?? 0)).slice(0, 4);
+  const watchHtml = watchAssets.length === 0
+    ? '<div class="empty">Aset Anda akan tampil di sini setelah ditambahkan.</div>'
+    : watchAssets.map((a) => `<a class="watch-card" data-watch-symbol="${escAttr(a.symbol)}" href="#/portofolio"><div class="row">${coinAvatar(a.symbol, { mint: a.mint, icon: a.icon })}<div><div class="w-sym">${escHtml(a.symbol)}</div><div class="muted">${a.type === 'wallet' ? 'Dari wallet' : escHtml(a.type)}</div></div></div>
+        <div class="w-price">${a.value != null ? show(a.value) : 'Belum ada harga'}</div>
+        <div class="muted">${a.pl === null ? 'Modal belum tercatat' : `<span class="${a.pl >= 0 ? 'pos' : 'neg'}">${isPrivat() ? '•••' : formatPct(a.pl)} P/L</span>`}</div></a>`).join('');
 
-  const watchHtml =
-    !pf || pf.assets.length === 0
-      ? '<div class="empty">Belum ada aset pantauan</div>'
-      : pf.assets
-        .slice(0, 4)
-        .map(
-          (a) => `<div class="watch-card"><div class="between"><span class="w-sym">${a.symbol}</span><span class="type-chip">${a.type}</span></div>
-        <div class="w-price" style="margin-top:6px">${a.current_price_idr != null ? show(a.current_price_idr) : '—'}</div>
-        ${a.type === 'crypto' && a.current_price_usd != null ? `<div class="muted" style="font-size:11.5px">${formatUsd(a.current_price_usd)}</div>` : ''}
-        <span class="pill ${(a.pl_percent ?? 0) >= 0 ? 'up' : 'down'}">${isPrivat() ? '•••' : formatPct(a.pl_percent)}</span></div>`,
-        )
-        .join('');
+  const trendCard = await wealthTrendCard({
+    title: 'Tren Kekayaan Bersih',
+    kind: 'total',
+    sub: 'Total kas + investasi',
+  });
 
   if (isDesktop()) {
-    el.innerHTML = `<div class="grid12">
-      <div class="span8">${balanceCard}</div>
-      <div class="span4"><div class="card"><strong>Alokasi Aset</strong><div style="margin-top:8px">${donut(sorted.map((a, i) => ({ label: a.label, value: a.value_idr, color: ALLOC_COLORS[i % 4] })))}</div></div></div>
-      <div class="span3">${kpiCard('Kas & Wallet', val('Kas'))}</div>
-      <div class="span3">${kpiCard('Saham', val('Saham'))}</div>
-      <div class="span3">${kpiCard('Crypto', val('Crypto'))}</div>
-      <div class="span3">${kpiCard('Reksadana', val('Reksadana'))}</div>
-      <div class="span7">${sumberDana}<div class="card"><strong>Watchlist</strong><div class="grid2" style="margin-top:8px">${watchHtml}</div></div></div>
-      <div class="span5"><div class="card"><strong>Pengeluaran per kategori</strong><div style="margin-top:8px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div>
-      <div class="card"><div class="between"><strong>Transaksi terkini</strong><a href="#/transaksi">Semua</a></div>${recentTx(txs)}</div></div>
+    el.innerHTML = `${intro}<div class="grid12 home-grid home-balanced">
+      <div class="span7">${balanceCard}</div>
+      <div class="span5">${sumberDana}</div>
+      <div class="span8">${trendCard}</div>
+      <div class="span4"><div class="card allocation-card"><span class="eyebrow">Komposisi kekayaan</span><h2 class="section-heading">Alokasi aset</h2><div class="allocation-chart">${donut(sorted.map((a, i) => ({ label: a.label, value: a.value_idr, color: ALLOC_COLORS[i % 4] })))}</div></div></div>
+      <div class="span6"><div class="card"><div class="between"><div><span class="eyebrow">Portofolio Anda</span><h2 class="section-heading">Aset terbesar</h2></div><a class="text-link" href="#/portofolio">Lihat semua ↗</a></div><div class="grid2">${watchHtml}</div></div></div>
+      <div class="span6"><div class="card"><div class="between"><h2 class="section-heading">Transaksi terkini</h2><a class="text-link" href="#/transaksi">Lihat semua ↗</a></div>${recentTx(txs)}</div></div>
+      ${dash.expense_by_category.length ? `<div class="span12"><div class="card"><h2 class="section-heading">Pengeluaran per kategori</h2><div style="margin-top:14px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div></div>` : ''}
     </div>`;
   } else {
-    el.innerHTML = `${balanceCard}${qaTiles}${sumberDana}
-      <div class="card"><div class="between"><strong>Watchlist</strong><a href="#/portofolio">Semua</a></div><div class="grid2" style="margin-top:8px">${watchHtml}</div></div>
-      <div class="card"><strong>Pengeluaran bulan ini</strong><div style="margin-top:8px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div>
+    el.innerHTML = `${intro}${balanceCard}${qaTiles}${sumberDana}
+      <div class="card"><div class="between"><h2 class="section-heading">Aset terbesar</h2><a class="text-link" href="#/portofolio">Lihat semua ↗</a></div><div class="grid2">${watchHtml}</div></div>
+      ${trendCard}
+      ${dash.expense_by_category.length ? `<div class="card"><strong>Pengeluaran bulan ini</strong><div style="margin-top:8px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div>` : ''}
       <div class="card"><div class="between"><strong>Transaksi terkini</strong><a href="#/transaksi">Semua</a></div>${recentTx(txs)}</div>`;
   }
 
@@ -116,6 +144,7 @@ export async function renderHome(el: HTMLElement): Promise<void> {
   el.querySelectorAll('[data-acc]').forEach(
     (b) => ((b as HTMLElement).onclick = () => (location.hash = '#/akun')),
   );
+  bindTrendHover(el);
 }
 
 function recentTx(
@@ -124,7 +153,7 @@ function recentTx(
   if (txs.length === 0) return '<div class="empty">Belum ada transaksi</div>';
   return `<table class="data" style="min-width:0"><tbody>${txs
     .map(
-      (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${t.category}</strong><div class="muted">${t.note || ''} • ${t.occurred_at.slice(0, 10)}</div></td>
+      (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''} • ${escHtml(t.occurred_at.slice(0, 10))}</div></td>
     <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : 'pos'}"><strong>${t.kind === 'expense' ? '−' : '+'}${formatIdr(t.amount_idr)}</strong></td></tr>`,
     )
     .join('')}</tbody></table>`;

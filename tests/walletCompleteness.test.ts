@@ -4,11 +4,19 @@ import fs from 'node:fs';
 import { parseLpPositions, parseStakingPositions, parseLimitOrders, fetchJupiterStaking, fetchJupiterLimitOrders, JupiterStakingProvider, JupiterLimitOrderProvider, JupiterLiquidityProvider } from '../src/server/providers/jupiterPositions.js';
 import { SolanaRpcFallbackProvider } from '../src/server/providers/solanaRpcFallback.js';
 import { MeteoraDlmmProvider } from '../src/server/providers/meteora.js';
+import { ElysiumProvider } from '../src/server/providers/elysium.js';
+import { RobinhoodNativeProvider, RobinhoodTokenProvider } from '../src/server/providers/robinhood.js';
+import { RobinhoodLpProvider } from '../src/server/providers/robinhoodLp.js';
+import { EvmExplorerProvider } from '../src/server/providers/evmExplorer.js';
+import { EvmNativeRpcProvider } from '../src/server/providers/evmNativeRpc.js';
+import { EthplorerProvider } from '../src/server/providers/ethplorer.js';
+import { HyperliquidSpotProvider } from '../src/server/providers/hyperliquid.js';
 import { resetBreakers } from '../src/server/services/circuitBreaker.js';
 import { commitPositions, recordSyncStatus, syncWallet } from '../src/server/services/walletSync.js';
 import { createWallet } from '../src/server/services/walletRegistry.js';
 import { listPositions, listLp, getSyncStatus, walletSyncHealth } from '../src/server/services/walletRead.js';
-import { getWalletDefi } from '../src/server/services/portfolioService.js';
+import { getWalletDefi, getUnifiedPortfolio, getWalletTokens } from '../src/server/services/portfolioService.js';
+import { getDashboard } from '../src/server/services/dashboardService.js';
 import type { NormalizedPosition } from '../src/server/providers/walletTypes.js';
 
 const SOL = '3keq3cRtYuoPCYBUL4s6N52ePguGivSZpNU4fzSiPXpd';
@@ -33,6 +41,63 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetBreakers(); db.close(); });
 
 describe('complete Solana balances', () => {
+  it('separates same-ticker Robinhood contracts so unpriced fake USDG cannot inflate the real balance', () => {
+    const w = createWallet(db, 'RH', '0xcc66dc8c9b4e597536740c04c6a0932770e3bafe', 'evm');
+    const token = { ...pos('token', 17, 'robinhood'), chain_id: 'robinhood', symbol: 'USDG', amount: '17', price_usd: 1 };
+    commitPositions(db, w.id, [
+      { ...token, meta: { token_id: '0x1111111111111111111111111111111111111111' } },
+      { ...token, amount: '9999', price_usd: null, value_usd: null, meta: { token_id: '0x2222222222222222222222222222222222222222' } },
+      { ...token, amount: '20', price_usd: 0.1, value_usd: 2, meta: { token_id: '0x3333333333333333333333333333333333333333' } },
+    ]);
+    const { tokens, hiddenCount } = getWalletTokens(db);
+    expect(tokens.map((t) => [t.amount, t.value_usd])).toEqual([['17', 17], ['20', 2]]);
+    expect(new Set(tokens.map((t) => t.asset_key)).size).toBe(2);
+    expect(hiddenCount).toBe(1);
+  });
+
+  it('accepts newly discovered Robinhood ETH alongside priced Elysium tokens when RPC omits prices', async () => {
+    vi.stubEnv('DEBANK_ACCESS_KEY', '');
+    for (const provider of [EvmExplorerProvider, EvmNativeRpcProvider, EthplorerProvider, HyperliquidSpotProvider, RobinhoodLpProvider])
+      vi.spyOn(provider.prototype, 'fetchPositions').mockResolvedValue([]);
+    const w = createWallet(db, 'RH & Elysium', '0xdf00a1295b384cd641086a40569501547077d14c', 'evm');
+    const token = { ...pos('token', 100, 'elysium'), chain_id: 'elysium', amount: '10', price_usd: 10,
+      meta: { token_id: '0x1111111111111111111111111111111111111111', sync_provider: 'elysium' } };
+    commitPositions(db, w.id, [token]);
+    vi.spyOn(ElysiumProvider.prototype, 'fetchPositions').mockResolvedValue([{ ...token, amount: '11', price_usd: null, value_usd: null }]);
+    vi.spyOn(RobinhoodNativeProvider.prototype, 'fetchPositions').mockResolvedValue([
+      { ...pos('token', 0, 'robinhood'), chain_id: 'robinhood', symbol: 'ETH', amount: '0.002', price_usd: null, value_usd: null },
+    ]);
+    vi.spyOn(RobinhoodTokenProvider.prototype, 'fetchPositions').mockRejectedValue(new Error('HTTP 403'));
+    const result = await syncWallet(db, w.id, 'evm');
+    expect(result.ok).toBe(true);
+    expect(result.partial).toBe(true);
+    const rows = listPositions(db, { wallet_id: w.id, show_all: true });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.chain_id === 'elysium')).toMatchObject({ amount: '11', price_usd: 10, value_usd: 110 });
+    expect(rows.find((r) => r.chain_id === 'robinhood')).toMatchObject({ symbol: 'ETH', amount: '0.002' });
+  });
+
+  it('counts LP fees once and includes both order sides, staking and spot in crypto totals', () => {
+    const w = createWallet(db, 'S', SOL);
+    db.prepare("INSERT INTO fx_cache (pair, rate) VALUES ('USDIDR',1000)").run();
+    db.prepare("INSERT INTO assets (type,symbol,qty,avg_buy_price_idr) VALUES ('crypto','MAN','1',0)").run();
+    db.prepare("INSERT INTO price_cache (symbol,price_idr) VALUES ('MAN',15000)").run();
+    commitPositions(db, w.id, [
+      pos('token', 10, 'solana-rpc'), pos('staking', 20, 'jupiter-meteora'),
+      { ...pos('defi', 30, 'jupiter-meteora'), symbol: 'USDC', meta: { output_symbol: 'SOL', order_side: 'input' } },
+      { ...pos('defi', 10, 'jupiter-meteora'), symbol: 'SOL', meta: { output_symbol: 'SOL', order_side: 'output' } },
+      { ...pos('lp', 105, 'Meteora DLMM'), meta: { pool_address: 'pool', position_address: 'position', position_value_usd: 100, unclaimed_fees_usd: 5 } },
+    ]);
+    const portfolio = getUnifiedPortfolio(db);
+    expect(portfolio.lp_value_idr).toBe(105000);
+    expect(portfolio.lp_fees_idr).toBe(5000);
+    expect(portfolio.by_type.crypto).toBe(190000);
+    expect(portfolio.total_value_idr).toBe(190000);
+    const dashboard = getDashboard(db);
+    expect(dashboard.allocation.find((a) => a.label === 'Crypto')?.value_idr).toBe(190000);
+    expect(dashboard.total_invested_value_idr).toBe(190000);
+  });
+
   it.each([
     ['meteora-met-staking', fetchJupiterStaking],
     ['meteora-dlmm-limit-orders', fetchJupiterLimitOrders],

@@ -22,7 +22,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const server = spawn('node', ['dist/server/index.js'], {
   cwd: new URL('../', import.meta.url).pathname.replace(/^\//, ''),
-  env: { ...process.env, PORT: String(PORT), DATABASE_PATH: DB, APP_PASSWORD: '', NODE_ENV: 'production', LOG_LEVEL: 'warn' },
+  env: { ...process.env, PORT: String(PORT), DATABASE_PATH: DB, APP_PASSWORD: 'demo-shot-password', NODE_ENV: 'production', LOG_LEVEL: 'warn' },
   stdio: 'pipe',
 });
 server.stdout.on('data', (d) => process.stdout.write(`[srv] ${d}`));
@@ -38,13 +38,29 @@ async function waitHealth() {
   throw new Error('server did not start');
 }
 
+await waitHealth();
+
+// Auth: server mengunci /api/* bila APP_PASSWORD diisi — login dulu, bawa cookie.
+let sessionCookie = '';
+{
+  const r = await fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: 'demo-shot-password' }),
+  });
+  if (!r.ok) throw new Error(`login -> ${r.status}: ${await r.text()}`);
+  const setCookie = r.headers.get('set-cookie') ?? '';
+  const m = /session=([^;]+)/.exec(setCookie);
+  if (!m) throw new Error('login tanpa cookie session');
+  sessionCookie = `session=${m[1]}`;
+}
+const sessionToken = sessionCookie.slice('session='.length);
+
 const api = (p, init) =>
-  fetch(`${BASE}${p}`, { ...init, headers: { 'Content-Type': 'application/json' } }).then(async (r) => {
+  fetch(`${BASE}${p}`, { ...init, headers: { 'Content-Type': 'application/json', Cookie: sessionCookie, ...(init?.headers ?? {}) } }).then(async (r) => {
     if (!r.ok) throw new Error(`${p} -> ${r.status}: ${await r.text()}`);
     return r.json();
   });
-
-await waitHealth();
 
 // ---- seed ----
 const bca = await api('/api/accounts', { method: 'POST', body: JSON.stringify({ name: 'BCA', type: 'bank', balance_idr: 8500000 }) });
@@ -86,7 +102,9 @@ const widths = [390, 768, 1440];
 let failures = 0;
 for (const w of widths) {
   for (const [name, hash] of pages) {
-    const pg = await browser.newPage({ viewport: { width: w, height: 900 } });
+    const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
+    await ctx.addCookies([{ name: 'session', value: sessionToken, domain: '127.0.0.1', path: '/' }]);
+    const pg = await ctx.newPage();
     await pg.goto(`${BASE}/${hash}`, { waitUntil: 'networkidle' });
     await pg.waitForTimeout(2500);
     await pg.screenshot({ path: path.join(OUT, `${name}-${w}.png`), fullPage: true });
@@ -108,11 +126,14 @@ for (const w of widths) {
     console.log(`${name}@${w}: bottomNav=${check.bottomNavItems} sidebar=${check.sidebarItems} scrollW=${check.scrollW} -> ${okNav && okScroll ? 'OK' : 'FAIL'}`);
     if (!okNav || !okScroll) failures++;
     await pg.close();
+    await ctx.close();
   }
 }
 // 360px no-horizontal-scroll probe
 {
-  const pg = await browser.newPage({ viewport: { width: 360, height: 800 } });
+  const ctx360 = await browser.newContext({ viewport: { width: 360, height: 800 } });
+  await ctx360.addCookies([{ name: 'session', value: sessionToken, domain: '127.0.0.1', path: '/' }]);
+  const pg = await ctx360.newPage();
   for (const [, hash] of pages) {
     await pg.goto(`${BASE}/${hash}`, { waitUntil: 'networkidle' });
     await pg.waitForTimeout(800);

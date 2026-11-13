@@ -39,11 +39,22 @@ export function applyTheme(t: Theme): void {
     localStorage.setItem('fintrack-theme', t);
   } catch { /* private mode */ }
   const meta = document.querySelector('meta[name="theme-color"]');
-  meta?.setAttribute('content', t === 'dark' ? '#0f151c' : '#0e9f6e');
+  meta?.setAttribute('content', t === 'dark' ? '#0a0f22' : '#2b5cff');
 }
 
 export function toggleTheme(): Theme {
   const next: Theme = getTheme() === 'dark' ? 'light' : 'dark';
   applyTheme(next);
   return next;
+}
+
+/** Status sesi (null = belum dicek). Tombol Keluar hanya tampil bila true. */
+let authed: boolean | null = null;
+
+export function getAuthed(): boolean | null {
+  return authed;
+}
+
+export function setAuthed(v: boolean | null): void {
+  authed = v;
 }

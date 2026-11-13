@@ -1,11 +1,14 @@
 import { icons } from './icons.js';
+import { escAttr, escHtml } from '../lib/escape.js';
+
+export { escAttr };
 
 export function openModal(title: string, bodyHtml: string): { close: () => void; el: HTMLElement } {
   const root = document.getElementById('modal-root')!;
   const back = document.createElement('div');
   back.className = 'modal-back';
-  back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
-    <div class="between"><strong style="font-size:17px">${title}</strong><button class="btn-ghost icon-btn" data-x aria-label="Tutup">${icons.close}</button></div>
+  back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${escAttr(title)}">
+    <div class="between"><strong style="font-size:17px">${escHtml(title)}</strong><button class="btn-ghost icon-btn" data-x aria-label="Tutup">${icons.close}</button></div>
     <div data-body>${bodyHtml}</div></div>`;
   root.appendChild(back);
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -13,6 +16,7 @@ export function openModal(title: string, bodyHtml: string): { close: () => void;
     back.remove();
     document.removeEventListener('keydown', onKey, true);
     previouslyFocused?.focus?.();
+    document.dispatchEvent(new Event('modal:closed'));
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -55,9 +59,6 @@ const KIND_LABEL: Record<string, string> = {
   transfer: 'Transfer',
 };
 
-const escAttr = (s: string): string =>
-  s.replace(/[&"'<>]/g, (c) => (c === '&' ? '&amp;' : c === '"' ? '&quot;' : c === "'" ? '&#39;' : c === '<' ? '&lt;' : '&gt;'));
-
 /** ISO → nilai <input type="datetime-local"> (waktu lokal pembaca). */
 function toLocalInput(iso: string): string {
   const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
@@ -87,7 +88,7 @@ export interface TxFormInit {
 }
 
 export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'expense', init?: TxFormInit): string {
-  const accOpts = accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(init?.account_id ?? '') ? 'selected' : ''}>${a.name}</option>`).join('');
+  const accOpts = accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(init?.account_id ?? '') ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('');
   const accName = (id: number | null | undefined): string => (id == null ? '' : accounts.find((a) => a.id === id)?.name ?? '');
 
   let cats = catOptions(kind);
@@ -120,11 +121,11 @@ export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'ex
 
   if (init?.lockAccounts) {
     fields.push(
-      `<label for="f-acc">Dari akun</label><div class="muted" style="margin-top:-6px">${accName(init.account_id) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-acc" value="${init.account_id ?? ''}" />`,
+      `<label for="f-acc">Dari akun</label><div class="muted" style="margin-top:-6px">${escHtml(accName(init.account_id)) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-acc" value="${escAttr(init.account_id ?? '')}" />`,
     );
     if (kind === 'transfer') {
       fields.push(
-        `<div class="muted" style="margin-top:2px">Ke akun: ${accName(init.to_account_id) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-to" value="${init.to_account_id ?? ''}" />`,
+        `<div class="muted" style="margin-top:2px">Ke akun: ${escHtml(accName(init.to_account_id)) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-to" value="${escAttr(init.to_account_id ?? '')}" />`,
       );
     }
     fields.push(`<div id="f-to-wrap" style="display:none"></div>`);

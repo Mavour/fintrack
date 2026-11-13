@@ -9,7 +9,8 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "useUnknownInCatchVariables": false
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src/web", "tests", "vite.config.ts", "vitest.config.ts"]
 }

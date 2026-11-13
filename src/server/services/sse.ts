@@ -22,6 +22,7 @@ export function sseClientCount(): number {
 
 /** Menit sejak klien SSE terakhir terlihat (Infinity bila belum pernah). */
 export function minutesSinceLastClient(): number {
+  if (clients.size > 0) return 0;
   if (lastClientAt === 0) return Infinity;
   return (Date.now() - lastClientAt) / 60_000;
 }
@@ -39,7 +40,7 @@ export function addSseClient(res: ServerResponse): () => void {
   }, 25_000);
   const done = (): void => {
     clearInterval(hb);
-    clients.delete(c);
+    if (clients.delete(c) && clients.size === 0) lastClientAt = Date.now();
   };
   res.on('close', done);
   return done;
@@ -54,6 +55,15 @@ export function emitSyncDone(scopes: SyncScope[]): void {
     } catch {
       clients.delete(c);
     }
+  }
+}
+
+/** Valuation frames use the authenticated SSE connection, without HTTP refetches. */
+export function emitLivePortfolio(portfolio: unknown): void {
+  if (clients.size === 0) return;
+  const payload = `event: portfolio:live\ndata: ${JSON.stringify(portfolio)}\n\n`;
+  for (const c of [...clients]) {
+    try { c.res.write(payload); } catch { clients.delete(c); }
   }
 }
 

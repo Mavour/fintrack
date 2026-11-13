@@ -1,5 +1,4 @@
 import { defineConfig } from 'vite';
-import path from 'node:path';
 
 export default defineConfig({
   root: 'src/web',
@@ -7,16 +6,15 @@ export default defineConfig({
     outDir: '../../dist/public',
     emptyOutDir: true,
   },
+  // Stempel build untuk diagnosis versi di UI (bukti update terlihat).
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')),
+  },
   server: {
     port: 5173,
     proxy: {
       '/api': 'http://localhost:3100',
       '/health': 'http://localhost:3100',
-    },
-  },
-  resolve: {
-    alias: {
-      '@shared': path.resolve(__dirname, 'src/shared'),
     },
   },
 });

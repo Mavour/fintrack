@@ -3,8 +3,8 @@
   "short_name": "FinTrack",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#0e9f6e",
+  "background_color": "#f4f6f8",
+  "theme_color": "#102c2b",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]

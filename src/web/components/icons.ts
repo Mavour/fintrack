@@ -22,8 +22,9 @@ export const icons = {
     `<path d="M4 4l16 16"/><path d="M10.6 5.9A9.8 9.8 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3.3 3.9M6.6 6.6A16 16 0 0 0 2.5 12S6 18.5 12 18.5c1.1 0 2.2-.2 3.1-.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>`,
   ),
   search: wrap(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/>`),
-  trend: `<svg viewBox="0 0 32 16" width="30" height="15" fill="none" stroke="#0e9f6e" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 13 9 8l5 3 7-6 6-3"/></svg>`,
+  trend: `<svg viewBox="0 0 32 16" width="30" height="15" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M1 13 9 8l5 3 7-6 6-3"/></svg>`,
   close: wrap(`<path d="M6 6l12 12M18 6 6 18"/>`),
+  menu: wrap(`<path d="M4 7h16M4 12h16M4 17h16"/>`),
   moon: wrap(`<path d="M20 13.5A8 8 0 0 1 10.5 4 8 8 0 1 0 20 13.5Z"/>`),
   sun: wrap(`<circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>`),
 };

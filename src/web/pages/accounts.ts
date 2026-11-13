@@ -1,4 +1,4 @@
-import { api } from '../lib/api.js';
+import { api, isTemporaryApiError } from '../lib/api.js';
 import { formatIdr, timeAgo } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal } from '../components/modal.js';
@@ -16,7 +16,8 @@ export async function renderAccounts(el: HTMLElement): Promise<void> {
   if (!el.innerHTML.trim()) el.innerHTML = `<div class="card"><div class="skeleton"></div></div>`;
   try {
     await renderAccountsInner(el);
-  } catch {
+  } catch (e) {
+    if (isTemporaryApiError(e)) throw e;
     el.innerHTML = `<div class="card"><div class="card-error">Gagal memuat, coba lagi.</div></div>`;
   }
 }
@@ -61,14 +62,17 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
     syncRows = w.sync_status;
     // Token tersembunyi dari Daftar Aset (tanpa harga / < $1) per wallet.
     const pos = (await api.get('/api/wallets/positions?show_all=true')) as {
-      positions: Array<{ wallet_id: number; kind: string; symbol: string; value_usd: number | null }>;
+      positions: Array<{ wallet_id: number; kind: string; symbol: string; chain_id: string; amount: string; value_usd: number | null; meta?: { token_id?: string } }>;
     };
     hiddenByWallet = new Map<number, string[]>();
     for (const p of pos.positions ?? []) {
       if (p.kind !== 'token' && p.kind !== 'staking') continue;
       if (p.value_usd !== null && p.value_usd >= 1) continue;
       const list = hiddenByWallet.get(p.wallet_id) ?? [];
-      if (!list.includes(p.symbol)) list.push(p.symbol);
+      const contract = p.meta?.token_id;
+      const identity = contract && /^0x[\da-f]{40}$/i.test(contract) ? ` (${contract})` : '';
+      const item = `${p.symbol} · ${p.amount} · ${p.chain_id}${identity}`;
+      if (!list.includes(item)) list.push(item);
       hiddenByWallet.set(p.wallet_id, list);
     }
     const st = (await api.get('/api/wallets/status')) as {
@@ -114,17 +118,17 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
       const hidden = hiddenByWallet.get(w.id) ?? [];
       const hiddenRow = hidden.length > 0
         ? `<button class="chip" data-whidden="${w.id}" style="margin-top:8px">${hidden.length} token disembunyikan (&lt; $1 / tanpa harga)</button>
-           <div id="whidden-${w.id}" style="display:none;margin-top:6px" class="muted">${hidden.sort().map((s) => escHtml(s)).join(' • ')}</div>`
+           <div id="whidden-${w.id}" style="display:none;margin-top:6px;overflow-wrap:anywhere" class="muted">${hidden.sort().map((s) => escHtml(s)).join(' • ')}</div>`
         : '';
       return `<div class="acc-item">
-        <div class="row" style="flex-wrap:wrap">${chainBadge(w.network_type === 'evm' ? 'eth' : 'solana', w.network_type === 'evm' ? 'EVM' : undefined)}${walletChip(w.label || 'Wallet', walletUrl(w.address))}</div>
+        <div class="row" style="flex-wrap:wrap">${chainBadge(w.network_type === 'evm' ? 'evm' : 'solana')}${walletChip(w.label || 'Wallet', walletUrl(w.address))}</div>
         <div style="margin-top:8px">${shortAddrLink(w.address)} <button class="btn-ghost copy-btn" data-copy="${w.address}">Salin</button></div>
         <div class="muted">Sync terakhir: ${okAt ? timeAgo(okAt) : 'belum pernah'}</div>
         ${errRows.map(provLine).join('')}
         ${okRows.map(provLine).join('')}
         <div class="muted" style="margin-top:6px">${w.network_type === 'solana'
           ? 'Saldo, staking, LP, dan dana limit order dibaca terpisah. Reward referral pending/claimable memerlukan verifikasi di Meteora dan belum termasuk total.'
-          : 'Saldo EVM termasuk Elysium (Kinetiq). Token tanpa harga belum termasuk total. LP/DeFi EVM memerlukan cakupan provider tersendiri; saldo wallet bukan bukti semua posisi sudah terbaca.'}</div>
+          : 'Saldo EVM termasuk Elysium (Kinetiq) dan Robinhood Chain. Token Robinhood serta LP aktif Uniswap v3/v4 dibaca langsung dari RPC. LP yang dititipkan ke staking/vault dan DEX lain memerlukan adapter tersendiri. Token tanpa harga belum termasuk total; cek status provider untuk kelengkapan sinkronisasi.'}</div>
         ${hiddenRow}
         <div class="row" style="margin-top:8px">
           <button class="btn-ghost" data-wedit="${w.id}">Ubah</button>

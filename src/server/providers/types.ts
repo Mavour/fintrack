@@ -2,6 +2,9 @@ export interface Price {
   symbol: string;
   priceIdr: number;
   source: string;
+  /** Market date, separate from the time this quote was downloaded. */
+  asOf?: string;
+  history?: Array<{ day: string; priceIdr: number }>;
 }
 
 export interface PriceProvider {

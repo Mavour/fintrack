@@ -22,6 +22,7 @@ export function registerPortfolioRoutes(app: FastifyInstance, db: Database.Datab
       assets: u.assets,
       wallet_tokens: u.wallet_tokens,
       hidden_tokens: u.hidden_tokens,
+      wallet_defi: u.wallet_defi,
       total_value_idr: u.total_value_idr,
       total_cost_idr: u.total_cost_idr,
       floating_pl_idr: u.floating_pl_idr,
@@ -29,6 +30,8 @@ export function registerPortfolioRoutes(app: FastifyInstance, db: Database.Datab
       cost_basis: u.cost_basis,
       diversification_score: u.diversification_score,
       diversification_label: u.diversification_label,
+      lp_value_idr: u.lp_value_idr,
+      lp_fees_idr: u.lp_fees_idr,
     };
   });
 

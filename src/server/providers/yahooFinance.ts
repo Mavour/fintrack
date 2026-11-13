@@ -1,5 +1,5 @@
 import type { Price, PriceProvider } from './types.js';
-import { withRetry } from './types.js';
+import { fetchWithTimeout, withRetry } from './types.js';
 
 /**
  * IDX stocks via yahoo-finance2. Tickers end with .JK (e.g. BBCA.JK).
@@ -8,23 +8,28 @@ import { withRetry } from './types.js';
 export class YahooFinanceProvider implements PriceProvider {
   readonly name = 'yahoo';
   async fetch(symbols: string[]): Promise<Price[]> {
-    const { default: yahooFinance } = await import('yahoo-finance2');
     const out: Price[] = [];
     for (const symbol of symbols) {
       try {
-        const quote = await withRetry(
-          () =>
-            (
-              yahooFinance as unknown as {
-                quote: (s: string) => Promise<{ regularMarketPrice?: number }>;
-              }
-            ).quote(symbol),
-          2,
-        );
-        const price = quote?.regularMarketPrice;
-        if (typeof price === 'number' && Number.isFinite(price)) {
-          out.push({ symbol, priceIdr: Math.round(price), source: 'yahoo' });
-        }
+        const result = await withRetry(async () => {
+          const res = await fetchWithTimeout(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d`);
+          if (!res.ok) throw Object.assign(new Error(`Yahoo HTTP ${res.status}`), { httpStatus: res.status });
+          const json = await res.json() as { chart?: { result?: Array<{
+            meta?: { currency?: string }; timestamp?: number[];
+            indicators?: { quote?: Array<{ close?: Array<number | null> }> };
+          }> } };
+          return json.chart?.result?.[0];
+        }, 2);
+        if (result?.meta?.currency !== 'IDR') continue;
+        const closes = result.indicators?.quote?.[0]?.close ?? [];
+        const history = (result.timestamp ?? []).flatMap((ts, i) => {
+          const price = closes[i];
+          return typeof price === 'number' && Number.isFinite(price) && price > 0
+            ? [{ day: new Date(ts * 1000 + 7 * 3600_000).toISOString().slice(0, 10), priceIdr: Math.round(price) }]
+            : [];
+        });
+        const last = history[history.length - 1];
+        if (last) out.push({ symbol, priceIdr: last.priceIdr, source: 'yahoo', asOf: last.day, history });
       } catch {
         // Keep last cached price on failure.
       }

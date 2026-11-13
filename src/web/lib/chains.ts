@@ -16,9 +16,11 @@ export const CHAIN_COLORS: Record<string, string> = {
   hyperevm: '#7C8CF8',
   hype: '#7C8CF8',
   elysium: '#55C4AC',
+  robinhood: '#008645',
 };
 
 export const CHAIN_LABELS: Record<string, string> = {
+  evm: 'EVM',
   solana: 'Solana',
   eth: 'Ethereum',
   ethereum: 'Ethereum',
@@ -35,6 +37,7 @@ export const CHAIN_LABELS: Record<string, string> = {
   hyperevm: 'HyperEVM',
   hype: 'HyperEVM',
   elysium: 'Elysium',
+  robinhood: 'Robinhood Chain',
 };
 
 function hexToRgb(hex: string): [number, number, number] {

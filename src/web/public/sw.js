@@ -1,9 +1,15 @@
-/* FinTrack service worker: app-shell cache + stale-while-revalidate for GET /api. */
-const SHELL = 'fintrack-shell-v2';
-const SHELL_URLS = ['/', '/index.html', '/styles.css', '/manifest.webmanifest', '/icon.svg'];
+/* FinTrack service worker: app-shell cache + no cache untuk /api sensitif. */
+const SHELL = 'fintrack-shell-v4';
+const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_URLS)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches.open(SHELL).then(async (c) => {
+      // Jangan gagalkan install bila satu file belum ada (mis. beda hasil build).
+      await Promise.allSettled(SHELL_URLS.map((u) => c.add(u)));
+      await self.skipWaiting();
+    }),
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -18,30 +24,19 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
   if (url.pathname.startsWith('/api/')) {
-    // Stale-while-revalidate: stay open offline with last data.
-    event.respondWith(
-      caches.open(SHELL).then(async (cache) => {
-        const cached = await cache.match(req);
-        const network = fetch(req)
-          .then((res) => {
-            if (res.ok) cache.put(req, res.clone());
-            return res;
-          })
-          .catch(() => cached);
-        return (await network) ?? (await cached) ?? Response.error();
-      }),
-    );
+    // Data terautentikasi JANGAN di-cache (privasi + hindari stale sensitif).
     return;
   }
-  // App shell: network-first so code updates apply immediately;
-  // cache fallback keeps the app open when offline.
+  // App shell: network-first, cache hanya respons OK; fallback ke index.html.
   event.respondWith(
     fetch(req)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(SHELL).then((c) => c.put(req, copy));
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(SHELL).then((c) => c.put(req, copy));
+        }
         return res;
       })
-      .catch(() => caches.match(req)),
+      .catch(() => caches.match(req).then((hit) => hit ?? caches.match('/index.html'))),
   );
 });

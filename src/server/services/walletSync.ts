@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
+import { Decimal } from 'decimal.js';
 import type { NormalizedPosition, WalletProvider, WalletRef } from '../providers/walletTypes.js';
 import { snapshotHash } from '../providers/walletTypes.js';
 import { JupiterPortfolioProvider } from '../providers/jupiterPortfolioV1.js';
@@ -11,6 +12,8 @@ import { EvmExplorerProvider } from '../providers/evmExplorer.js';
 import { EvmNativeRpcProvider } from '../providers/evmNativeRpc.js';
 import { EthplorerProvider } from '../providers/ethplorer.js';
 import { ElysiumProvider } from '../providers/elysium.js';
+import { RobinhoodNativeProvider, RobinhoodTokenProvider } from '../providers/robinhood.js';
+import { RobinhoodLpProvider } from '../providers/robinhoodLp.js';
 import { HyperliquidSpotProvider } from '../providers/hyperliquid.js';
 import { getWallet } from './walletRegistry.js';
 import { logger } from '../logger.js';
@@ -64,7 +67,7 @@ function providersFor(
     list.push(new EvmExplorerProvider(), new EvmNativeRpcProvider(), new EthplorerProvider());
   }
   // HyperCore spot (resmi, tanpa key) untuk alamat EVM — berjalan paralel.
-  list.push(new HyperliquidSpotProvider(), new ElysiumProvider());
+  list.push(new HyperliquidSpotProvider(), new ElysiumProvider(), new RobinhoodNativeProvider(), new RobinhoodTokenProvider(), new RobinhoodLpProvider());
   return list;
 }
 
@@ -314,6 +317,25 @@ async function syncWalletUnlocked(
   if (wallet.network_type === 'evm') {
     finalPositions = dedupeHyperliquid(finalPositions).kept;
     finalPositions = dedupeEvmKeyless(finalPositions).kept;
+    // RPC returns quantities without prices. Reuse the last contract-specific
+    // price before the drop guard, otherwise a priced wallet can indefinitely
+    // reject new balances as a 100% loss while the price API is rate-limited.
+    for (const p of finalPositions) {
+      if (p.kind !== 'token' || p.price_usd !== null) continue;
+      const old = previous.find((r) => {
+        if (r.kind !== 'token' || r.chain_id !== p.chain_id || r.protocol !== p.protocol) return false;
+        try {
+          const meta = JSON.parse(r.meta);
+          const contract = typeof meta.token_id === 'string' ? meta.token_id.toLowerCase() : null;
+          const next = typeof p.meta.token_id === 'string' ? p.meta.token_id.toLowerCase() : null;
+          return contract && next ? contract === next : !contract && !next && r.symbol === p.symbol;
+        } catch { return false; }
+      });
+      if (old?.price_usd != null && Number.isFinite(old.price_usd) && old.price_usd > 0) {
+        p.price_usd = old.price_usd;
+        p.value_usd = new Decimal(p.amount).times(old.price_usd).toNumber();
+      }
+    }
   }
 
   const commit = commitPositions(db, wallet.id, finalPositions, scope);

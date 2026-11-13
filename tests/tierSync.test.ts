@@ -254,7 +254,7 @@ describe('tier harga', () => {
         if (String(url).includes('coingecko')) return resp(429);
         if (String(url).includes('dexscreener')) {
           return resp(200, [
-            { baseToken: { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' }, priceUsd: '2558.14' },
+            { chainId: 'ethereum', baseToken: { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' }, priceUsd: '2558.14' },
           ]);
         }
         return resp(500);

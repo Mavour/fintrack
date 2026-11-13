@@ -5,6 +5,7 @@ import { getDashboard, getWealthTrend } from '../services/dashboardService.js';
 import { getPrices, getHistory } from '../providers/priceStore.js';
 import { backfillThinHistories } from '../providers/historyBackfill.js';
 import { refreshCrypto, refreshStocks } from '../providers/priceOrchestrator.js';
+import { refreshMutualFunds } from '../providers/mutualFunds.js';
 import type { OrchestratorOpts } from '../providers/priceOrchestrator.js';
 
 export function registerDashboardRoutes(app: FastifyInstance, db: Database.Database): void {
@@ -37,6 +38,7 @@ export function registerDashboardRoutes(app: FastifyInstance, db: Database.Datab
     }) as OrchestratorOpts;
     await refreshCrypto(db, o);
     await refreshStocks(db, o);
+    await refreshMutualFunds(db);
     return { ok: true, prices: getPrices(db) };
   });
 

@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS assets (
   name TEXT NOT NULL DEFAULT '',
   qty TEXT NOT NULL DEFAULT '0',
   avg_buy_price_idr INTEGER NOT NULL DEFAULT 0 CHECK (avg_buy_price_idr >= 0),
+  total_cost_idr INTEGER CHECK (total_cost_idr >= 0),
   -- Chain aset manual (cth. solana) untuk badge; kunci dedup by mint diisi
   -- otomatis dari posisi wallet yang qty-nya identik.
   chain TEXT,
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS price_cache (
   symbol TEXT PRIMARY KEY,
   price_idr INTEGER NOT NULL CHECK (price_idr >= 0),
   source TEXT NOT NULL DEFAULT 'manual',
+  price_date TEXT,
   fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

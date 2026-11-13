@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
+import { z } from 'zod';
 import {
   listAccounts,
   createAccount,
@@ -9,6 +10,8 @@ import {
   UpdateAccountSchema,
 } from '../services/accountService.js';
 
+const IdParam = z.object({ id: z.coerce.number().int().positive() });
+
 export function registerAccountRoutes(app: FastifyInstance, db: Database.Database): void {
   app.get('/api/accounts', async () => listAccounts(db));
 
@@ -17,11 +20,13 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
   });
 
   app.patch('/api/accounts/:id', async (req: FastifyRequest<{ Params: { id: string } }>) => {
-    return updateAccount(db, Number(req.params.id), UpdateAccountSchema.parse(req.body));
+    const params = IdParam.parse(req.params);
+    return updateAccount(db, params.id, UpdateAccountSchema.parse(req.body));
   });
 
   app.delete('/api/accounts/:id', async (req: FastifyRequest<{ Params: { id: string } }>) => {
-    deleteAccount(db, Number(req.params.id));
+    const params = IdParam.parse(req.params);
+    deleteAccount(db, params.id);
     return { ok: true };
   });
 }

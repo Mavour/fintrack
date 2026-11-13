@@ -6,17 +6,22 @@ import { backfillThinHistories } from '../providers/historyBackfill.js';
 import { verifyMetMapping } from '../providers/coingecko.js';
 import { recordWealthSnapshot } from '../services/dashboardService.js';
 import { logger } from '../logger.js';
+import { refreshMutualFunds } from '../providers/mutualFunds.js';
 
 function scheduleSafe(expr: string, fallback: string): string {
   return cron.validate(expr) ? expr : fallback;
 }
 
 export function startScheduler(db: Database.Database, opts: OrchestratorOpts): void {
+  // Recover the latest published NAV/close after downtime, including weekends.
+  void refreshMutualFunds(db);
+  void refreshStocks(db, opts);
+  cron.schedule('*/15 * * * *', () => { void refreshMutualFunds(db); });
   // Crypto every 60s, single batched request per provider.
   cron.schedule('* * * * *', () => {
     refreshCrypto(db, opts).catch((e) => logger.error({ err: e }, 'crypto job failed'));
   });
-  // Stocks every 5 min (provider itself checks market hours).
+  // Stocks every 5 min; the provider retains the actual trading date after close.
   cron.schedule('*/5 * * * *', () => {
     refreshStocks(db, opts).catch((e) => logger.error({ err: e }, 'stock job failed'));
   });

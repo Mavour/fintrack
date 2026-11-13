@@ -7,11 +7,31 @@ Dasar putih, kartu putih, aksen ungu-teal. Mobile-first, PWA-ready.
 - Portofolio crypto/saham/reksadana, P/L, skor diversifikasi
 - Dashboard + 3 donut (kategori, alokasi, per aset), sparkline 7 hari
 - Harga otomatis: CoinGecko → fallback Binance (crypto, 60 dtk),
-  Yahoo Finance `.JK` (saham, 5 mnt saat bursa 09–16 WIB),
-  NAB manual (reksadana). Cache `price_cache`, badge
+  Yahoo Finance `.JK` (saham, 5 mnt; tanggal perdagangan tetap ditampilkan),
+  NAB publik Kontan (reksadana, dicek saat boot dan setiap 15 menit). Cache `price_cache`, badge
   `Sinkron Live` / `Harga tertunda` / `Harga manual`
 - Auth single-user `APP_PASSWORD` (bcrypt), cookie httpOnly+samesite
 - Backup SQLite harian (14 hari)
+
+Harga kripto streaming memakai satu koneksi WebSocket publik Binance Spot untuk
+SOL, ETH, HYPE, dan MET (Meteora). Harga dicocokkan lewat mint/kontrak atau mapping
+CoinGecko manual yang dikenal, bukan ticker wallet. Gunakan Node 22+ agar native
+WebSocket tersedia. UI menggabungkan tick paling sering sekali per detik dan
+menampilkan `Live Binance · USDT`; acuan USDT diperlakukan sebagai estimasi USD
+untuk konversi rupiah. Ini harga referensi pasar, bukan estimasi hasil jual DEX.
+Token tanpa mapping/feed tetap memakai harga berkala. Tick lewat 20 detik atau
+koneksi putus otomatis kembali ke harga provider berkala dan mencoba tersambung
+kembali. Saldo, komposisi LP, fees, dan limit order tetap mengikuti sinkron on-chain;
+label streaming berlaku pada harga token, bukan jaminan semua posisi live.
+
+Reksadana otomatis memakai simbol produk yang dipetakan eksplisit: `RD66` (Avrist Ada Kas
+Mutiara), `RD838` (Majoris Sukuk Negara Indonesia), `RD984` (Manulife Dana Kas Syariah),
+`RD13` (ABF Indonesia Bond Index Fund), dan `RD1544` (Schroder Dana Mantap Plus II).
+Produk lain tetap dapat memakai harga manual. Qty saham adalah jumlah lembar.
+P/L total memakai total modal jika diisi; P/L harian saham/reksadana membandingkan
+harga/NAB bertanggal dengan publikasi sebelumnya menggunakan qty saat ini, tanpa
+dividen. Tanggal acuan ditampilkan; bila sumber gagal, harga terakhir dipertahankan.
+NAB bukan harga real-time dan jadwal publikasi masing-masing sumber dapat berbeda.
 
 ## Mulai cepat (lokal)
 ```bash
@@ -31,9 +51,9 @@ PM2: `pm2 restart ecosystem.config.cjs --update-env`. Docker: publish
 
 ## Ubuntu VPS dari nol
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs sqlite3 git
-git clone <repo> /opt/dompet && cd /opt/dompet
+git clone https://github.com/Mavour/fintrack.git /opt/dompet && cd /opt/dompet
 cp .env.example .env && nano .env
 npm ci && npm run build && npm test
 sudo npm i -g pm2
@@ -48,12 +68,21 @@ sudo systemctl reload caddy
 
 Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
 
+Data bank/investasi dipindahkan menggunakan [seed privat](docs/portfolio-restore.md).
+Snapshot berada di `data/` dan tidak ikut GitHub; salin file tersebut secara privat
+ke VPS agar saldo, unit, dan modal tidak perlu diinput ulang.
+
 ## Sinkron dompet onchain (bebas API key)
 - **Solana**: daftarkan alamat publik di **Akun & Bank > Wallet**, alamat
   terdeteksi otomatis. Saldo diambil dari Jupiter Ultra holdings + metadata
   token terverifikasi (tanpa API key).
-- **EVM** (Ethereum, Arbitrum, Base, Optimism, Polygon): via explorer Blockscout
-  publik (tanpa API key). Harga mengikuti provider CoinGecko yang sudah ada.
+- **EVM** (Ethereum, Arbitrum, Base, Optimism, Polygon): bila `DEBANK_ACCESS_KEY`
+  diisi, posisi token + DeFi/LP diambil dari DeBank Cloud OpenAPI. **Tanpa key**
+  (default), sync memakai explorer **Blockscout publik tanpa API key** untuk
+  native + ERC-20 semua chain EVM (DeFi/LP EVM butuh DeBank; bila unit DeBank
+  habis, fallback Blockscout otomatis menjaga saldo tetap tersinkron). Harga
+  mengikuti provider CoinGecko yang sudah ada (token via contract, native via
+  kontrak wrapped kanonikal).
 - Hanya alamat publik (watch-only). Qty mengikuti onchain; harga beli lama
   dipertahankan bila ada (kalau tidak, P/L disembunyikan). Token tak dikenal
   (tanpa simbol) dilewati otomatis.
@@ -62,6 +91,15 @@ Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
   diperbarui otomatis tiap 5 menit. Debu <$1 dilewati.
 
 ## Wallet tracker + LP (otomatis, read-only)
+- Robinhood Chain mainnet **4663**: discovery ERC-20/NFT dari log transfer RPC,
+  kemudian `balanceOf` dan `ownerOf` pada blok yang sama via Multicall3.
+  LP aktif Uniswap v3/v4 yang dimiliki langsung dibaca dari kontrak resmi:
+  principal + fees dihitung sekali; out-of-range tetap termasuk aset.
+  NFT kosong/burn/berpindah pemilik dikecualikan. LP custodial staking/vault,
+  posisi yang sudah kosong dengan fees tersisa, dan DEX lain belum dicakup.
+  Discovery dan snapshot dibatasi sekali per menit per wallet; error RPC
+  mempertahankan snapshot lama. Harga token dicocokkan chain+kontrak,
+  termasuk harga quote USDG dari rasio pasangan; ticker bukan bukti harga $1.
 - Elysium **Kinetiq mainnet (99901)** ikut dibaca untuk alamat EVM yang
   terdaftar: native HYPE via RPC, kontrak ERC-20 dari riwayat explorer resmi,
   lalu saldo `balanceOf` pada blok yang sama. Tidak menghitung saldo dari
@@ -76,7 +114,6 @@ Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
   sesuai cakupan Jupiter). Pool DLMM yang muncul di kedua sumber dihitung sekali.
 - Provider gagal mempertahankan posisi dan waktu sinkron terakhirnya. Kegagalan
   parsial tampil tertunda; status sukses lama tidak menutupi error terbaru.
-
 - Daftarkan wallet di **Akun & Bank > Wallet** (label + alamat publik).
   Jaringan terdeteksi otomatis (Solana base58 / EVM `0x`). Satu alamat EVM
   berlaku untuk semua chain EVM. Tidak pernah meminta/menyimpan private key,
@@ -188,3 +225,90 @@ Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
 
 ## Struktur
 `src/server/{routes,services,providers,db,jobs}` `src/web/{pages,components,lib}` `tests/`
+
+
+## Agent Dorm / Karo: API integrasi baca-saja
+
+Backend menyediakan server status terpisah di 127.0.0.1:9002 untuk agentId
+portfolio. API ikut lifecycle fintrack dan tidak menjalankan scheduler sendiri.
+Tidak ada dependency baru. API tidak otomatis diaktifkan atau menjalankan app.
+
+Tambahkan ke .env saat siap mengaktifkan (file .env asli tidak diubah oleh patch):
+
+```env
+STATUS_API_ENABLED=true
+STATUS_API_HOST=127.0.0.1
+STATUS_API_PORT=9002
+STATUS_API_KEY=<kunci-acak-khusus-integrasi>
+STATUS_API_DAY_TIMEZONE=Asia/Makassar
+STATUS_API_FX_MAX_AGE_SEC=86400
+STATUS_API_MONTHLY_BUDGET_IDR=
+```
+
+STATUS_API_KEY wajib, termasuk di loopback. Jika key dan STATUS_API_ENABLED
+belum diisi, API nonaktif. Key bukan password aplikasi atau session secret.
+Saat memakai .env.example, ubah STATUS_API_ENABLED=false menjadi true setelah
+key diisi. Gunakan SSH tunnel atau reverse proxy HTTPS untuk lintas mesin;
+jangan kirim Bearer key lewat internet HTTP.
+
+- GET /status: envelope portfolio untuk Agent Dorm; HTTP 200 juga jika warn/error.
+- GET /health: HTTP 200 hanya jika snapshot ok, selain itu 503.
+- Kedua endpoint wajib Authorization: Bearer <STATUS_API_KEY>.
+- POST/PUT/PATCH/DELETE ditolak. Tidak ada endpoint membuat transaksi,
+  mengubah saldo, mengubah budget aplikasi, refresh provider, atau impor wallet.
+- Auth/login dan endpoint aplikasi fintrack yang sudah ada tidak diubah.
+
+Aktivasi membutuhkan build backend dan restart fintrack dengan environment yang
+sudah dikonfigurasi. Patch ini tidak melakukan restart atau membuka database
+keuangan asli selama pengujian. Build normal tetap npm run build; untuk backend
+saja, jalankan tsc -p tsconfig.server.json melalui TypeScript lokal.
+
+Konfigurasi Dorm pada tahap penyambungan nanti (base URL tanpa /status):
+
+```env
+PORTFOLIO_MODE=http
+PORTFOLIO_URL=http://127.0.0.1:9002
+PORTFOLIO_API_KEY=<key-yang-sama>
+PORTFOLIO_POLL_MS=5000
+```
+
+### Jaminan jalur baca dan pemetaan data
+
+- Koneksi SQLite API terpisah dibuka readonly + query_only, fileMustExist=true.
+  Tidak memanggil migrasi, seeding, pencatatan wealth history, atau sinkronisasi.
+- Snapshot dibaca konsisten dalam read transaction, diperbarui tiap 30 detik.
+  GET hanya menyajikan cache. Jika pembaruan gagal atau cache lebih tua dari
+  90 detik, status menjadi error; updatedAt tidak dimajukan oleh polling HTTP.
+- Deduplikasi aset manual/wallet mengikuti getUnifiedPortfolio. Mode readOnly
+  melewatkan penulisan flag superseded_by_wallet; perilaku default fungsi
+  untuk UI fintrack tetap sama. LP dihitung dari lp_positions bersama fee-nya,
+  bukan ditambah lagi dari baris LP duplikat di wallet_positions.
+- Saldo rekening nonaktif dikecualikan. Empat bucket akun (cash/stable/lp/spot)
+  menghindari hilangnya eksposur LP pada advisor Dorm yang membaca per tipe.
+  Saham/reksadana dan order DeFi masuk bucket investasi spot, bukan stable cair.
+- IDR tetap tersedia di metrics.native. USD dikonversi memakai fx_cache pair
+  USDIDR yang sudah tersimpan dan belum basi. Tidak ada fetch kurs baru atau
+  fallback angka kurs tetap. Nilai USD adalah estimasi pada kurs cache saat ini,
+  bukan kurs historis saat transaksi. Kurs hilang/basi menghasilkan null + alert.
+- Aset tanpa valuasi lengkap menghasilkan valuationComplete=false dan
+  netWorthUsd=null; knownNetWorthUsd adalah subtotal yang diketahui. Harga atau
+  data wallet basi dan error sinkronisasi diberi peringatan tanpa membocorkan
+  raw error provider, alamat wallet, session, password hash, atau path database.
+- Arus kas mengecualikan transfer antar-akun dan transaksi di masa depan.
+  Hari ini / 7 hari / 30 hari adalah hari kalender lokal termasuk hari ini;
+  monthSpentUsd mengikuti bulan lokal STATUS_API_DAY_TIMEZONE.
+- Daftar transaksi maksimal 60, terbaru dulu dengan ID stabil; agregat arus kas
+  memakai seluruh transaksi dalam periodenya, tidak dibatasi 60 item.
+- Fintrack belum mempunyai fitur budget belanja. Jika diperlukan, isi
+  STATUS_API_MONTHLY_BUDGET_IDR dengan anggaran nyata pengguna (integer IDR).
+  Field ini hanya metadata integrasi, tidak menulis transaksi atau mengubah saldo.
+  Blank = budgetConfigured=false, dailyUsd/monthlyUsd=null. Budget harian adalah
+  pembagian budget bulanan sesuai jumlah hari pada bulan berjalan; nilai 0 yang
+  diisi eksplisit berarti budget nol, bukan tidak diketahui.
+- events=[]; rapor/advisor tetap merupakan tugas Dorm. Sebelum menyambungkan UI,
+  tangani budgetConfigured=false, valuationComplete=false, dan field USD null
+  agar advisor tidak menafsirkan data belum tersedia sebagai nol atau boros.
+
+Verifikasi: npm run typecheck, npm test. Tes API memakai database fixture dan
+menguji query-only, perubahan saldo nol, transfer/date boundaries, deduplikasi,
+FX/budget tidak tersedia, Bearer auth, dan larangan endpoint mutasi.

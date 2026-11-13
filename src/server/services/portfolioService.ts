@@ -4,6 +4,7 @@ import { parseQty, qtyTimesPriceIdr, costBasis, plNominal, plPercent } from './m
 import { getCachedUsdIdr } from '../providers/fxRate.js';
 import { readCachedIcons } from '../providers/tokenMeta.js';
 import { Decimal } from 'decimal.js';
+import { getLiveQuote, liveAssetId } from './liveCrypto.js';
 
 export const AssetTypeSchema = z.enum(['crypto', 'saham', 'reksadana']);
 export type AssetType = z.infer<typeof AssetTypeSchema>;
@@ -24,7 +25,8 @@ export const UpsertAssetSchema = z.object({
     { message: 'Invalid qty decimal string' },
   ),
   avg_buy_price_idr: z.number().int().min(0),
-  price_idr: z.number().int().min(0).optional(),
+  total_cost_idr: z.number().int().min(0).nullable().optional(),
+  price_idr: z.number().finite().min(0).optional(),
   /** Opsional: badge chain aset manual + kunci dedup by mint. */
   chain: z.string().trim().max(40).nullable().optional(),
   mint: z.string().trim().max(60).nullable().optional(),
@@ -38,6 +40,7 @@ export interface Asset {
   name: string;
   qty: string;
   avg_buy_price_idr: number;
+  total_cost_idr?: number | null;
   chain: string | null;
   mint: string | null;
   superseded_by_wallet: number;
@@ -58,6 +61,11 @@ export interface AssetValuation extends Asset {
   price_source: string | null;
   price_fetched_at: string | null;
   is_stale: boolean;
+  price_date?: string | null;
+  daily_pl_idr?: number | null;
+  daily_pl_percent?: number | null;
+  daily_base_date?: string | null;
+  price_mode?: 'stream' | 'periodic';
 }
 
 export const STALE_THRESHOLD_MS = 15 * 60 * 1000;
@@ -66,23 +74,24 @@ export function upsertAsset(db: Database.Database, input: UpsertAssetInput): Ass
   const parsed = UpsertAssetSchema.parse(input);
   const atomic = db.transaction(() => {
     db.prepare(
-      `INSERT INTO assets (type, symbol, name, qty, avg_buy_price_idr, chain, mint, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO assets (type, symbol, name, qty, avg_buy_price_idr, total_cost_idr, chain, mint, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(symbol) DO UPDATE SET type = excluded.type, name = excluded.name,
          qty = excluded.qty, avg_buy_price_idr = excluded.avg_buy_price_idr,
+         total_cost_idr = CASE WHEN ? THEN excluded.total_cost_idr ELSE assets.total_cost_idr END,
          chain = COALESCE(excluded.chain, assets.chain),
          mint = COALESCE(excluded.mint, assets.mint),
          updated_at = datetime('now')`,
     ).run(
-      parsed.type, parsed.symbol, parsed.name, parsed.qty, parsed.avg_buy_price_idr,
-      parsed.chain ?? null, parsed.mint ?? null,
+      parsed.type, parsed.symbol, parsed.name, parsed.qty, parsed.avg_buy_price_idr, parsed.total_cost_idr ?? null,
+      parsed.chain ?? null, parsed.mint ?? null, Number(parsed.total_cost_idr !== undefined),
     );
     if (parsed.price_idr !== undefined) {
       db.prepare(
         `INSERT INTO price_cache (symbol, price_idr, source, fetched_at)
          VALUES (?, ?, 'manual', datetime('now'))
          ON CONFLICT(symbol) DO UPDATE SET price_idr = excluded.price_idr,
-           source = 'manual', fetched_at = datetime('now')`,
+           source = 'manual', price_date = NULL, fetched_at = datetime('now')`,
       ).run(parsed.symbol, parsed.price_idr);
     }
   });
@@ -113,8 +122,8 @@ export function valuateAsset(
     | { price_idr: number; source: string; fetched_at: string }
     | undefined;
   // avg_buy_price_idr = 0 means "unknown" (user forgot) -> hide P/L instead of showing nonsense.
-  const buyKnown = asset.avg_buy_price_idr > 0;
-  const cost = buyKnown ? costBasis(asset.qty, asset.avg_buy_price_idr) : 0;
+  const buyKnown = asset.total_cost_idr != null || asset.avg_buy_price_idr > 0;
+  const cost = asset.total_cost_idr ?? (buyKnown ? costBasis(asset.qty, asset.avg_buy_price_idr) : 0);
   const toUsd = (priceIdr: number | null): number | null => {
     if (priceIdr === null || asset.type !== 'crypto') return null;
     const rate = getCachedUsdIdr(db);
@@ -139,7 +148,7 @@ export function valuateAsset(
   const currentValue = qtyTimesPriceIdr(asset.qty, cached.price_idr);
   const priceUsd = toUsd(cached.price_idr);
   const valueUsd = priceUsd === null ? null : parseQty(asset.qty).times(priceUsd).toNumber();
-  const stale = nowMs - new Date(cached.fetched_at + 'Z').getTime() > STALE_THRESHOLD_MS;
+  const stale = nowMs - new Date(cached.fetched_at + 'Z').getTime() > (asset.type === 'crypto' ? STALE_THRESHOLD_MS : 4 * 86400_000);
   return {
     ...asset,
     current_price_idr: cached.price_idr,
@@ -160,15 +169,35 @@ export function listValuations(db: Database.Database, type?: AssetType): AssetVa
   if (assets.length === 0) return [];
   // Batch: 1 query price_cache + 1 query fx (hindari N+1 2N+1 query).
   const symbols = [...new Set(assets.map((a) => a.symbol))];
-  const priceMap = new Map<string, { price_idr: number; source: string; fetched_at: string }>();
+  const priceMap = new Map<string, { price_idr: number; source: string; fetched_at: string; price_date: string | null }>();
   for (let i = 0; i < symbols.length; i += 200) {
     const chunk = symbols.slice(i, i + 200);
-    const found = db.prepare(`SELECT symbol, price_idr, source, fetched_at FROM price_cache WHERE symbol IN (${chunk.map(() => '?').join(',')})`).all(...chunk) as Array<{ symbol: string; price_idr: number; source: string; fetched_at: string }>;
+    const found = db.prepare(`SELECT symbol, price_idr, source, fetched_at, price_date FROM price_cache WHERE symbol IN (${chunk.map(() => '?').join(',')})`).all(...chunk) as Array<{ symbol: string; price_idr: number; source: string; fetched_at: string; price_date: string | null }>;
     for (const f of found) priceMap.set(f.symbol, f);
   }
   const rate = getCachedUsdIdr(db);
   const nowMs = Date.now();
-  return assets.map((a) => valuateAssetCached(a, priceMap.get(a.symbol), rate, nowMs));
+  const mappedIds = new Map((db.prepare("SELECT symbol, provider_id FROM asset_map WHERE provider = 'coingecko'").all() as Array<{ symbol: string; provider_id: string }>).map((r) => [r.symbol, r.provider_id]));
+  return assets.map((a) => {
+    let cached = priceMap.get(a.symbol);
+    const liveId = a.mint ? liveAssetId(a.chain ?? '', { mint: a.mint }) : mappedIds.get(a.symbol) ?? null;
+    const live = a.type === 'crypto' ? getLiveQuote(liveId) : null;
+    if (live && rate) cached = { price_idr: live.price * rate, source: live.source, fetched_at: new Date(live.at).toISOString().slice(0, 19).replace('T', ' '), price_date: null };
+    const value = valuateAssetCached(a, cached, rate, nowMs);
+    if (a.type === 'crypto') return { ...value, price_mode: live && rate ? 'stream' : 'periodic' };
+    const day = cached?.price_date;
+    const previous = day ? db.prepare(`SELECT price_idr, date(fetched_at) AS day FROM price_history
+      WHERE symbol = ? AND fetched_at < ? ORDER BY fetched_at DESC LIMIT 1`).get(a.symbol, `${day} 00:00:00`) as
+      { price_idr: number; day: string } | undefined : undefined;
+    const daily = previous && cached ? parseQty(a.qty).times(new Decimal(cached.price_idr).minus(previous.price_idr)) : null;
+    return {
+      ...value, price_date: day ?? null,
+      is_stale: value.is_stale || (!!day && nowMs - Date.parse(day) > 4 * 86400_000),
+      daily_pl_idr: daily?.toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber() ?? null,
+      daily_pl_percent: previous && cached && previous.price_idr > 0 ? plPercent(cached.price_idr, previous.price_idr) : null,
+      daily_base_date: previous?.day ?? null,
+    };
+  });
 }
 
 function valuateAssetCached(
@@ -177,8 +206,8 @@ function valuateAssetCached(
   rate: number | null,
   nowMs: number,
 ): AssetValuation {
-  const buyKnown = asset.avg_buy_price_idr > 0;
-  const cost = buyKnown ? costBasis(asset.qty, asset.avg_buy_price_idr) : 0;
+  const buyKnown = asset.total_cost_idr != null || asset.avg_buy_price_idr > 0;
+  const cost = asset.total_cost_idr ?? (buyKnown ? costBasis(asset.qty, asset.avg_buy_price_idr) : 0);
   if (!cached) {
     return {
       ...asset,
@@ -197,7 +226,7 @@ function valuateAssetCached(
   const currentValue = qtyTimesPriceIdr(asset.qty, cached.price_idr);
   const priceUsd = asset.type !== 'crypto' || !rate ? null : new Decimal(cached.price_idr).div(rate).toNumber();
   const valueUsd = priceUsd === null ? null : parseQty(asset.qty).times(priceUsd).toNumber();
-  const stale = nowMs - new Date(cached.fetched_at + 'Z').getTime() > STALE_THRESHOLD_MS;
+  const stale = nowMs - new Date(cached.fetched_at + 'Z').getTime() > (asset.type === 'crypto' ? STALE_THRESHOLD_MS : 4 * 86400_000);
   return {
     ...asset,
     current_price_idr: cached.price_idr,
@@ -266,6 +295,9 @@ export function listCostBasis(db: Database.Database): Record<string, number> {
 // ---------------------------------------------------------------------------
 
 export interface WalletTokenV {
+  price_mode?: 'stream' | 'periodic' | 'mixed';
+  price_source?: string;
+  asset_key?: string;
   source: 'wallet';
   type: 'crypto';
   symbol: string;
@@ -422,7 +454,7 @@ export function getWalletTokens(
   const rate = getCachedUsdIdr(db);
   const basis = listCostBasis(db);
   const minUsd = opts.minUsd ?? 1;
-  const groups = new Map<string, { name: string; amount: InstanceType<typeof Decimal>; valueUsd: number | null; chains: Set<string>; wallets: Set<string>; mint: string | null; addrByLabel: Map<string, string> }>();
+  const groups = new Map<string, { symbol: string; name: string; amount: InstanceType<typeof Decimal>; valueUsd: number | null; chains: Set<string>; wallets: Set<string>; mint: string | null; addrByLabel: Map<string, string>; streamed: number; periodic: number }>();
   try {
     const rows = db.prepare(
       `SELECT UPPER(wp.symbol) AS sym, wp.name, wp.amount, wp.value_usd, wp.chain_id, wp.meta, w.label AS label, w.address AS address
@@ -430,16 +462,27 @@ export function getWalletTokens(
        WHERE wp.kind IN ('token','staking')`,
     ).all() as Array<{ sym: string; name: string; amount: string; value_usd: number | null; chain_id: string; meta: string; label: string; address: string }>;
     for (const r of rows) {
-      if (!groups.has(r.sym)) {
-        groups.set(r.sym, { name: r.name, amount: new Decimal(0), valueUsd: null, chains: new Set(), wallets: new Set(), mint: null, addrByLabel: new Map() });
+      const contract = metaJson(r.meta).token_id;
+      // Robinhood has many unrelated airdrops impersonating USDG. Never mix
+      // their quantities/cost basis with the real contract merely by ticker.
+      const key = r.chain_id === 'robinhood' && typeof contract === 'string' && /^0x[\da-f]{40}$/i.test(contract)
+        ? `${r.sym}:robinhood:${contract.toLowerCase()}` : r.sym;
+      if (!groups.has(key)) {
+        groups.set(key, { symbol: r.sym, name: r.name, amount: new Decimal(0), valueUsd: null, chains: new Set(), wallets: new Set(), mint: null, addrByLabel: new Map(), streamed: 0, periodic: 0 });
       }
-      const g = groups.get(r.sym)!;
+      const g = groups.get(key)!;
       try {
         g.amount = g.amount.plus(parseQty(r.amount));
       } catch {
         // Qty rusak dilewati, nilai tetap dijumlah bila ada.
       }
-      if (r.value_usd !== null && r.value_usd !== undefined) g.valueUsd = (g.valueUsd ?? 0) + r.value_usd;
+      const live = getLiveQuote(liveAssetId(r.chain_id, metaJson(r.meta)));
+      let rowValue = r.value_usd;
+      if (live) {
+        try { rowValue = parseQty(r.amount).times(live.price).toNumber(); g.streamed++; }
+        catch { g.periodic++; }
+      } else g.periodic++;
+      if (rowValue !== null && rowValue !== undefined) g.valueUsd = (g.valueUsd ?? 0) + rowValue;
       if (!g.mint) {
         try {
           const m = (JSON.parse(r.meta) as Record<string, unknown>)?.mint;
@@ -458,7 +501,8 @@ export function getWalletTokens(
   const icons = readCachedIcons(db, [...groups.values()].map((g) => g.mint).filter((m): m is string => !!m));
   const out: WalletTokenV[] = [];
   let hiddenCount = 0;
-  for (const [sym, g] of groups) {
+  for (const [key, g] of groups) {
+    const sym = g.symbol;
     const amtNum = g.amount.toNumber();
     const hasValue = g.valueUsd !== null && g.valueUsd > 0;
     // Filter token: hanya posisi berharga DAN ≥ $1 yang tampil di Portofolio.
@@ -470,13 +514,14 @@ export function getWalletTokens(
     const priceUsd = new Decimal(g.valueUsd as number).div(amtNum).toNumber();
     const valueIdr = rate !== null && rate !== undefined ? new Decimal(g.valueUsd as number).times(rate).toDecimalPlaces(0, 4).toNumber() : null;
     const unitIdr = valueIdr !== null && amtNum > 0 ? new Decimal(valueIdr).div(amtNum).toDecimalPlaces(0, 4).toNumber() : null;
-    const buy = basis[sym];
+    const buy = key === sym ? basis[sym] : undefined;
     // P/L HANYA bila user mengisi cost basis. Tanpa itu: cost & P/L null → UI "-".
     const hasCost = buy !== undefined && buy !== null;
     const costIdr = hasCost ? Math.round(new Decimal(buy).times(g.amount).toNumber()) : null;
     const plIdr = hasCost && valueIdr !== null ? valueIdr - (costIdr ?? 0) : null;
     const plPct = hasCost && plIdr !== null && (costIdr ?? 0) > 0 ? (plIdr / (costIdr as number)) * 100 : null;
     out.push({
+      ...(key === sym ? {} : { asset_key: key }),
       source: 'wallet',
       type: 'crypto',
       symbol: sym,
@@ -490,6 +535,8 @@ export function getWalletTokens(
       pl_idr: plIdr,
       pl_percent: plPct,
       has_cost: hasCost,
+      price_mode: g.streamed ? (g.periodic ? 'mixed' : 'stream') : 'periodic',
+      price_source: g.streamed ? 'binance-stream-usdt' : 'wallet-provider',
       chains: [...g.chains],
       wallets: [...g.wallets],
       wallet_addrs: [...g.wallets].map((l) => g.addrByLabel.get(l) ?? ''),

@@ -11,7 +11,7 @@ export async function wealthTrendCard(opts: {
   sub: string;
   color?: string;
 }): Promise<string> {
-  const color = opts.color ?? '#2b5cff';
+  const color = opts.color ?? '#218776';
   let points: Array<{ day: string; total_wealth_idr: number; invest_value_idr: number }> = [];
   try {
     const res = (await api.get('/api/wealth/trend?days=90')) as { points?: typeof points };
@@ -34,7 +34,7 @@ export async function wealthTrendCard(opts: {
   const pct = first > 0 ? ((last - first) / first) * 100 : 0;
   return `<div class="card"><strong>${opts.title}</strong>
     <div class="between" style="margin-top:8px"><span class="muted">${opts.sub}</span><span class="pill ${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span></div>
-    <div class="between" style="margin-top:4px"><span class="muted">Kini</span><strong>${isPrivat() ? '••••••' : formatIdr(last)}</strong></div>
+    <div class="between" style="margin-top:4px"><span class="muted">Snapshot terakhir · ${fmtDay(`${valid[valid.length - 1].day}T00:00:00`)}</span><strong>${isPrivat() ? '••••••' : formatIdr(last)}</strong></div>
     <div style="margin-top:8px;color:var(--muted)">${trendline(pts, color)}</div>
     <div class="muted" style="margin-top:6px;font-size:12px">Snapshot harian sejak ${valid[0].day} — awal periode direkonstruksi dari catatan transaksi & harga.</div>
   </div>`;

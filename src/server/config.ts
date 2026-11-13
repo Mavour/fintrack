@@ -25,29 +25,39 @@ export function tierSec(raw: string | undefined, def: number, min = 10): number 
 }
 
 export function getConfig() {
+  const nodeEnv = process.env.NODE_ENV ?? 'development';
+  const sessionSecret = process.env.SESSION_SECRET ?? 'dev-secret-change-me-32chars!!';
+  if (nodeEnv === 'production' && (sessionSecret.length < 32 || sessionSecret.startsWith('dev-secret') || sessionSecret.startsWith('change-me'))) {
+    throw new Error('SESSION_SECRET wajib diisi minimal 32 karakter acak saat NODE_ENV=production');
+  }
+  const num = (raw: string | undefined, def: number): number => {
+    if (raw === undefined || raw === '') return def;
+    const v = Number(raw);
+    return Number.isFinite(v) && v > 0 ? v : def;
+  };
   return {
-    port: Number(process.env.PORT ?? 3100),
-    host: process.env.HOST ?? '0.0.0.0',
+    port: num(process.env.PORT, 3100),
+    host: process.env.HOST ?? '127.0.0.1',
     databasePath: process.env.DATABASE_PATH ?? './data/app.db',
-    sessionSecret: process.env.SESSION_SECRET ?? 'dev-secret-change-me-32chars!!',
+    sessionSecret,
     appPassword: process.env.APP_PASSWORD ?? '',
-    nodeEnv: process.env.NODE_ENV ?? 'development',
+    nodeEnv,
     coingeckoApiKey: process.env.COINGECKO_API_KEY ?? '',
     etherscanApiKey: process.env.ETHERSCAN_API_KEY ?? '',
     binanceEnabled: (process.env.BINANCE_ENABLED ?? 'true') === 'true',
     yahooEnabled: (process.env.YAHOO_ENABLED ?? 'true') === 'true',
-    fxCacheTtlMs: Number(process.env.FX_CACHE_TTL_MS ?? 3_600_000),
+    fxCacheTtlMs: num(process.env.FX_CACHE_TTL_MS, 3_600_000),
     backupDir: process.env.BACKUP_DIR ?? './backups',
-    backupRetentionDays: Number(process.env.BACKUP_RETENTION_DAYS ?? 14),
+    backupRetentionDays: Math.max(1, Math.floor(num(process.env.BACKUP_RETENTION_DAYS, 14))),
     // --- Wallet tracker (read-only) ---
     seedWallets: parseSeedWallets(process.env.SEED_WALLETS),
     jupiterApiKey: process.env.JUPITER_API_KEY ?? '',
     debankAccessKey: process.env.DEBANK_ACCESS_KEY ?? '',
-    debankDailyUnitBudget: Number(process.env.DEBANK_DAILY_UNIT_BUDGET ?? 0),
+    debankDailyUnitBudget: Math.floor(num(process.env.DEBANK_DAILY_UNIT_BUDGET, 0)),
     solanaRpcUrl: process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com',
     walletSolanaCron: process.env.WALLET_SOLANA_CRON ?? '*/5 * * * *',
     walletEvmCron: process.env.WALLET_EVM_CRON ?? '*/10 * * * *',
-    walletSyncCooldownMs: Number(process.env.WALLET_SYNC_COOLDOWN_MS ?? 30_000),
+    walletSyncCooldownMs: Math.max(5000, Math.floor(num(process.env.WALLET_SYNC_COOLDOWN_MS, 30_000))),
     meteoraDlmmBase: process.env.METEORA_DLMM_BASE ?? 'https://dlmm.datapi.meteora.ag',
     meteoraDammV2Base: process.env.METEORA_DAMM_V2_BASE ?? 'https://damm-v2.datapi.meteora.ag',
     // --- Tiered near-real-time sync (detik, min 10) ---

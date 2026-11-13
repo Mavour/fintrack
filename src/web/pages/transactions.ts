@@ -1,5 +1,6 @@
 import { api } from '../lib/api.js';
 import { formatIdr, fmtDate } from '../lib/format.js';
+import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal, txForm, wireCatOptions, readOccurredAt, type TxFormInit } from '../components/modal.js';
 import { isDesktop } from '../lib/state.js';
 
@@ -83,10 +84,10 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
 
   const toolbar = `
     <div class="toolbar" role="search">
-      <input type="search" id="t-search" placeholder="Cari catatan / kategori…" value="${fSearch}" aria-label="Cari transaksi" />
-      <input type="month" id="t-month" value="${fMonth}" aria-label="Filter bulan" />
-      <select id="t-cat" aria-label="Filter kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${fCat === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
-      <select id="t-acc" aria-label="Filter akun"><option value="">Semua akun</option>${accounts.map((a) => `<option value="${a.id}" ${fAcc === String(a.id) ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
+      <input type="search" id="t-search" placeholder="Cari catatan / kategori…" value="${escAttr(fSearch)}" aria-label="Cari transaksi" />
+      <input type="month" id="t-month" value="${escAttr(fMonth)}" aria-label="Filter bulan" />
+      <select id="t-cat" aria-label="Filter kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${fCat === c ? 'selected' : ''}>${escHtml(c)}</option>`).join('')}</select>
+      <select id="t-acc" aria-label="Filter akun"><option value="">Semua akun</option>${accounts.map((a) => `<option value="${a.id}" ${fAcc === String(a.id) ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('')}</select>
     </div>`;
 
   if (isDesktop()) {
@@ -135,15 +136,24 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
     renderTransactions(el);
   };
   el.querySelectorAll('[data-sort]').forEach(
-    (th) => ((th as HTMLElement).onclick = () => {
-      const k = (th as HTMLElement).dataset.sort as 'date' | 'amount';
-      if (sortKey === k) sortDir = sortDir === 1 ? -1 : 1;
-      else {
-        sortKey = k;
-        sortDir = -1;
-      }
-      renderTransactions(el);
-    }),
+    (th) => {
+      const activate = () => {
+        const k = (th as HTMLElement).dataset.sort as 'date' | 'amount';
+        if (sortKey === k) sortDir = sortDir === 1 ? -1 : 1;
+        else {
+          sortKey = k;
+          sortDir = -1;
+        }
+        renderTransactions(el);
+      };
+      (th as HTMLElement).onclick = activate;
+      (th as HTMLElement).onkeydown = (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          activate();
+        }
+      };
+    },
   );
 
   document.getElementById('btn-new')!.onclick = () => openNew(el, 'expense', accounts);
@@ -182,15 +192,15 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
 function txTable(txs: Tx[], accName: Map<number, string>): string {
   if (txs.length === 0) return '<div class="empty">Tidak ada transaksi yang cocok.</div>';
   const arrow = (k: string) => (sortKey === k ? (sortDir === 1 ? ' ▲' : ' ▼') : '');
-  return `<table class="data"><thead><tr>
-    <th class="sortable" data-sort="date" tabindex="0">Tanggal${arrow('date')}</th>
+  return `<table class="data fixed"><thead><tr>
+    <th class="sortable" data-sort="date" tabindex="0" role="button" aria-label="Urutkan tanggal">Tanggal${arrow('date')}</th>
     <th>Keterangan</th><th>Kategori</th><th>Akun</th>
-    <th class="sortable" data-sort="amount" tabindex="0" style="text-align:right">Nominal${arrow('amount')}</th><th style="text-align:right">Aksi</th>
+    <th class="sortable" data-sort="amount" tabindex="0" role="button" aria-label="Urutkan nominal" style="text-align:right">Nominal${arrow('amount')}</th><th style="text-align:right">Aksi</th>
   </tr></thead><tbody>${txs
     .map(
-      (t) => `<tr><td style="white-space:nowrap">${tDate(t.occurred_at)}</td>
-      <td>${t.note || '—'}${t.kind === 'transfer' ? `<div class="muted">→ ${accName.get(t.to_account_id ?? -1) ?? ''}</div>` : ''}</td>
-      <td>${t.category}</td><td>${accName.get(t.account_id ?? -1) ?? '—'}</td>
+      (t) => `<tr><td style="white-space:nowrap">${escHtml(tDate(t.occurred_at))}</td>
+      <td>${escHtml(t.note) || '—'}${t.kind === 'transfer' ? `<div class="muted">→ ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}</div>` : ''}</td>
+      <td>${escHtml(t.category)}</td><td>${escHtml(accName.get(t.account_id ?? -1) ?? '—')}</td>
       <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : ''}"><strong>${t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : ''}${formatIdr(t.amount_idr)}</strong></td>
       <td style="text-align:right;white-space:nowrap"><button class="btn-ghost" data-edit-id="${t.id}" style="min-height:40px">Ubah</button> <button class="btn-ghost" data-del="${t.id}" style="min-height:40px">Hapus</button></td></tr>`,
     )
@@ -207,7 +217,7 @@ function txCards(txs: Tx[], accName: Map<number, string>): string {
       const amtSign = t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : '';
       return `<div class="between" style="padding:10px 0;border-bottom:1px solid var(--soft)">
       <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px;background:${avatarBg}">${avatarSign}</span>
-      <div><strong>${t.category}</strong><div class="muted">${t.note || ''}${t.kind === 'transfer' ? ` → ${accName.get(t.to_account_id ?? -1) ?? ''}` : ''} • ${accName.get(t.account_id ?? -1) ?? ''} • ${tDate(t.occurred_at)}</div></div></div>
+      <div><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(tDate(t.occurred_at))}</div></div></div>
       <div style="text-align:right"><div class="${amtCls}"><strong>${amtSign}${formatIdr(t.amount_idr)}</strong></div>
       <div class="row" style="gap:6px;justify-content:flex-end;margin-top:4px"><button class="btn-ghost" data-edit-id="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Ubah</button><button class="btn-ghost" data-del="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Hapus</button></div></div></div>`;
     })

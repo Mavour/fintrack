@@ -1,7 +1,9 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Decimal } from 'decimal.js';
 import { fileURLToPath } from 'node:url';
+import { restorePortfolioSeed } from './portfolioSeed.js';
 
 let db: Database.Database | null = null;
 
@@ -14,7 +16,11 @@ export function getDatabase(dbPath?: string): Database.Database {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.pragma('synchronous = NORMAL');
+  db.pragma('journal_size_limit = 67108864');
+  db.pragma('wal_autocheckpoint = 1000');
+  db.pragma('cache_size = -64000');
   runMigrations(db);
+  restorePortfolioSeed(db);
   return db;
 }
 
@@ -36,6 +42,10 @@ export function runMigrations(database: Database.Database): void {
  */
 function runColumnMigrations(database: Database.Database): void {
   const cols = database.prepare('PRAGMA table_info(assets)').all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'total_cost_idr'))
+    database.exec('ALTER TABLE assets ADD COLUMN total_cost_idr INTEGER CHECK (total_cost_idr >= 0)');
+  const priceCols = database.prepare('PRAGMA table_info(price_cache)').all() as Array<{ name: string }>;
+  if (!priceCols.some((c) => c.name === 'price_date')) database.exec('ALTER TABLE price_cache ADD COLUMN price_date TEXT');
   if (!cols.some((c) => c.name === 'chain')) database.exec('ALTER TABLE assets ADD COLUMN chain TEXT');
   if (!cols.some((c) => c.name === 'mint')) database.exec('ALTER TABLE assets ADD COLUMN mint TEXT');
   if (!cols.some((c) => c.name === 'superseded_by_wallet'))
@@ -62,13 +72,20 @@ function backfillAssetMints(database: Database.Database): void {
     return;
   }
   const update = database.prepare('UPDATE assets SET chain = ?, mint = ?, updated_at = datetime(\'now\') WHERE symbol = ?');
-  const set = (v: string): number => new Number(v).valueOf();
   for (const a of assets) {
-    const aQty = set(a.qty);
-    if (!Number.isFinite(aQty)) continue;
+    let aQty: Decimal;
+    try {
+      aQty = new Decimal(a.qty);
+    } catch {
+      continue;
+    }
+    if (!aQty.isFinite()) continue;
     const sameQty = rows.filter((r) => {
-      const q = set(r.amount);
-      return Number.isFinite(q) && Math.abs(q - aQty) < 1e-9;
+      try {
+        return new Decimal(r.amount).equals(aQty);
+      } catch {
+        return false;
+      }
     });
     const distinct = new Map<string, { chain_id: string; symbol: string }>();
     for (const r of sameQty) {
@@ -82,9 +99,18 @@ function backfillAssetMints(database: Database.Database): void {
       if (!distinct.has(mint)) distinct.set(mint, { chain_id: r.chain_id, symbol: r.symbol.toUpperCase() });
     }
     if (distinct.size !== 1) continue;
-    const [mint, info] = [...distinct.entries()][0];
+    const first = [...distinct.entries()][0];
+    if (!first) continue;
+    const [mint, info] = first;
     // Qty sama di banyak aset manual → pertahankan aman (jangan salah isi).
-    const clashes = assets.filter((x) => x.symbol !== a.symbol && Math.abs(set(x.qty) - aQty) < 1e-9).length;
+    const clashes = assets.filter((x) => {
+      if (x.symbol === a.symbol) return false;
+      try {
+        return new Decimal(x.qty).equals(aQty);
+      } catch {
+        return false;
+      }
+    }).length;
     if (clashes > 0) continue;
     update.run(info.chain_id || 'solana', mint, a.symbol);
   }
