@@ -1,5 +1,6 @@
 import { emitSyncDone } from './sse.js';
 import { logger } from '../logger.js';
+import WebSocketClient from 'ws';
 
 const PAIRS: Record<string, string> = { SOLUSDT: 'solana', ETHUSDT: 'ethereum', HYPEUSDT: 'hyperliquid', METUSDT: 'meteora' };
 const MINTS: Record<string, string> = {
@@ -51,7 +52,8 @@ interface Socket {
 export function startLiveCrypto(onPrices?: () => void): () => void {
   notifyPrices = onPrices ?? (() => emitSyncDone(['price']));
   const NativeSocket = (globalThis as unknown as { WebSocket?: new (url: string) => Socket }).WebSocket;
-  if (!NativeSocket) { logger.warn('Native WebSocket unavailable; use Node 22+ for crypto streaming'); return () => {}; }
+  const SocketClient = NativeSocket ?? (WebSocketClient as unknown as new (url: string) => Socket);
+  if (!NativeSocket) logger.info('crypto streaming using ws client (native WebSocket unavailable)');
   let socket: Socket | null = null;
   let reconnect: ReturnType<typeof setTimeout> | null = null;
   let watchdog: ReturnType<typeof setInterval> | null = null;
@@ -74,7 +76,7 @@ export function startLiveCrypto(onPrices?: () => void): () => void {
     };
     try {
       const streams = Object.keys(PAIRS).map((pair) => `${pair.toLowerCase()}@aggTrade`).join('/');
-      socket = new NativeSocket(`wss://data-stream.binance.vision/stream?streams=${streams}`);
+      socket = new SocketClient(`wss://data-stream.binance.vision/stream?streams=${streams}`);
       socket.addEventListener('open', () => { logger.info('crypto spot stream connected'); });
       socket.addEventListener('message', (event) => {
         if (failed || stopped || typeof event.data !== 'string') return;

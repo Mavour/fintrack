@@ -8,15 +8,15 @@ Dasar putih, kartu putih, aksen ungu-teal. Mobile-first, PWA-ready.
 - Dashboard + 3 donut (kategori, alokasi, per aset), sparkline 7 hari
 - Harga otomatis: CoinGecko → fallback Binance (crypto, 60 dtk),
   Yahoo Finance `.JK` (saham, 5 mnt; tanggal perdagangan tetap ditampilkan),
-  NAB publik Kontan (reksadana, dicek saat boot dan setiap 15 menit). Cache `price_cache`, badge
+  NAB publik Kontan → fallback arsip Reksadana ID (reksadana, dicek saat boot dan setiap 15 menit). Cache `price_cache`, badge
   `Sinkron Live` / `Harga tertunda` / `Harga manual`
 - Auth single-user `APP_PASSWORD` (bcrypt), cookie httpOnly+samesite
 - Backup SQLite harian (14 hari)
 
 Harga kripto streaming memakai satu koneksi WebSocket publik Binance Spot untuk
 SOL, ETH, HYPE, dan MET (Meteora). Harga dicocokkan lewat mint/kontrak atau mapping
-CoinGecko manual yang dikenal, bukan ticker wallet. Gunakan Node 22+ agar native
-WebSocket tersedia. UI menggabungkan tick paling sering sekali per detik dan
+CoinGecko manual yang dikenal, bukan ticker wallet. Jika Node tidak menyediakan
+WebSocket bawaan, aplikasi memakai dependency runtime `ws`. UI menggabungkan tick paling sering sekali per detik dan
 menampilkan `Live Binance · USDT`; acuan USDT diperlakukan sebagai estimasi USD
 untuk konversi rupiah. Ini harga referensi pasar, bukan estimasi hasil jual DEX.
 Token tanpa mapping/feed tetap memakai harga berkala. Tick lewat 20 detik atau
@@ -32,6 +32,11 @@ P/L total memakai total modal jika diisi; P/L harian saham/reksadana membandingk
 harga/NAB bertanggal dengan publikasi sebelumnya menggunakan qty saat ini, tanpa
 dividen. Tanggal acuan ditampilkan; bila sumber gagal, harga terakhir dipertahankan.
 NAB bukan harga real-time dan jadwal publikasi masing-masing sumber dapat berbeda.
+Jika Kontan menolak akses dari VPS (misalnya HTTP 403), aplikasi mencoba
+[arsip publik Reksadana ID](https://reksadana.risanb.com/download/), dengan ID produk
+dan mata uang diverifikasi. Tanggal NAB asli serta sumber asal (Bibit/Bareksa)
+tetap disimpan; arsip tidak ditandai sebagai harga real-time. Harga terakhir
+dipertahankan bila kedua sumber gagal atau arsip lebih lama daripada cache.
 
 ## Mulai cepat (lokal)
 ```bash

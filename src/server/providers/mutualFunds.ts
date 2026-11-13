@@ -25,18 +25,47 @@ export function parseFundHistory(html: string): Array<{ day: string; priceIdr: n
   });
 }
 
+/** Public secondary archive; keep its original trading date and source attribution. */
+export function parseArchivedNav(json: unknown, symbol: string): { history: Array<{ day: string; priceIdr: number }>; source: string } {
+  const fund = json as { symbol?: string; currency_exchange?: { currency?: string }; history?: { nav?: Array<{ date: string; value: number; source: string }> } } | null;
+  if (fund?.symbol !== symbol || fund.currency_exchange?.currency !== 'IDR' || !Array.isArray(fund.history?.nav))
+    throw new Error('Identitas produk arsip NAB tidak cocok');
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = fund.history.nav.filter((r) => typeof r.date === 'string' && r.date <= today).slice(-45);
+  if (!rows.length) throw new Error('Arsip NAB kosong');
+  const sources = new Set(['bibit', 'bareksa', 'kontan', 'makmur']);
+  const history = rows.map((r, i) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date) || !Number.isFinite(Date.parse(r.date))
+      || new Date(r.date).toISOString().slice(0, 10) !== r.date || !Number.isFinite(r.value) || r.value <= 0
+      || !sources.has(r.source) || (i > 0 && r.date <= rows[i - 1]!.date)) throw new Error('Arsip NAB tidak valid');
+    return { day: r.date, priceIdr: r.value };
+  });
+  return { history, source: `reksadana-id:${rows[rows.length - 1]!.source}` };
+}
+
 export async function refreshMutualFunds(db: Database.Database): Promise<void> {
   const assets = db.prepare("SELECT symbol FROM assets WHERE type = 'reksadana'").all() as Array<{ symbol: string }>;
   await Promise.all(assets.map(async ({ symbol }) => {
     const fund = MUTUAL_FUNDS.find((f) => f.symbol === symbol);
     if (!fund) return;
+    let history: Array<{ day: string; priceIdr: number }> | undefined;
+    let source = 'kontan';
     try {
-      const url = `https://pusatdata.kontan.co.id/reksadana/get_chart_product/?produk_id=${fund.kontanId}&select=nab&periode=1&start_date=&end_date=`;
-      const res = await fetchWithTimeout(url, 15_000);
-      if (!res.ok) throw new Error(`Kontan HTTP ${res.status}`);
-      const history = parseFundHistory(await res.text());
+      try {
+        const url = `https://pusatdata.kontan.co.id/reksadana/get_chart_product/?produk_id=${fund.kontanId}&select=nab&periode=1&start_date=&end_date=`;
+        const res = await fetchWithTimeout(url, 15_000);
+        if (!res.ok) throw new Error(`Kontan HTTP ${res.status}`);
+        history = parseFundHistory(await res.text());
+      } catch { /* Try the public archive; never bypass the source's block. */ }
+      if (!history) {
+        const res = await fetchWithTimeout(`https://reksadana.risanb.com/api/funds/${symbol}.json`, 15_000);
+        if (!res.ok) throw new Error(`Arsip NAB HTTP ${res.status}`);
+        const archive = parseArchivedNav(await res.json(), symbol);
+        history = archive.history;
+        source = archive.source;
+      }
       const last = history[history.length - 1]!;
-      const price: Price = { symbol, priceIdr: last.priceIdr, asOf: last.day, source: 'kontan', history };
+      const price: Price = { symbol, priceIdr: last.priceIdr, asOf: last.day, source, history };
       storePrices(db, [price]);
     } catch (err) {
       logger.warn({ err, symbol }, 'fund NAV refresh failed, keeping dated cache');

@@ -3,6 +3,12 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/server/db/database.js';
 import { acceptLiveTrade, getLiveQuote, liveAssetId, resetLiveQuotes, startLiveCrypto } from '../src/server/services/liveCrypto.js';
 import { getWalletTokens, listValuations, upsertAsset } from '../src/server/services/portfolioService.js';
+const fallbackSocket = vi.hoisted(() => ({ created: vi.fn() }));
+vi.mock('ws', () => ({ default: class {
+  constructor(url: string) { fallbackSocket.created(url); }
+  close() {}
+  addEventListener() {}
+} }));
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -15,6 +21,13 @@ const solMint = 'So11111111111111111111111111111111111111112';
 const tick = (symbol: string, price: string, at = Date.now()) => ({ e: 'aggTrade', s: symbol, p: price, T: at });
 
 describe('spot crypto streaming', () => {
+  it('uses the ws client when the Node runtime has no native WebSocket', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', undefined);
+    const stop = startLiveCrypto(); cleanups.push(stop);
+    expect(fallbackSocket.created).toHaveBeenCalledWith(expect.stringContaining('wss://data-stream.binance.vision/stream?streams='));
+    stop();
+  });
   it('only maps explicit mint/contract identities, not impersonating tickers', () => {
     expect(liveAssetId('solana', { mint: solMint })).toBe('solana');
     expect(liveAssetId('solana', { mint: 'fake-sol', symbol: 'SOL' })).toBeNull();
