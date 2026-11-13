@@ -29,6 +29,12 @@ function walkTs(dir: string, out: string[] = []): string[] {
 }
 
 describe('demo guard: tidak ada data mock di jalur runtime', () => {
+  it('production env template never registers example wallets', () => {
+    const env = fs.readFileSync(path.join(ROOT, '.env.example'), 'utf-8');
+    const value = /^SEED_WALLETS=(.*)$/m.exec(env)?.[1];
+    expect(value).toBeDefined();
+    expect(JSON.parse(value!)).toEqual([]);
+  });
   it('seed-dummy menolak berjalan tanpa DEMO_MODE=true', () => {
     const env = { ...process.env };
     delete env.DEMO_MODE;
