@@ -15,7 +15,7 @@ export function openModal(title: string, bodyHtml: string): { close: () => void;
   const close = () => {
     back.remove();
     document.removeEventListener('keydown', onKey, true);
-    previouslyFocused?.focus?.();
+    previouslyFocused?.focus?.({ preventScroll: true });
     document.dispatchEvent(new Event('modal:closed'));
   };
   const onKey = (e: KeyboardEvent) => {
@@ -29,7 +29,7 @@ export function openModal(title: string, bodyHtml: string): { close: () => void;
     if (e.target === back || (e.target as HTMLElement).closest('[data-x]')) close();
   });
   const first = back.querySelector('input, select, button.btn-primary') as HTMLElement | null;
-  first?.focus?.();
+  first?.focus?.({ preventScroll: true });
   return { close, el: back.querySelector('[data-body]') as HTMLElement };
 }
 

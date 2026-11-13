@@ -34,7 +34,8 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+/* Live prices must never make the browser choose a new viewport scroll anchor. */
+html { -webkit-text-size-adjust: 100%; overflow-anchor: none; }
 body {
   margin: 0;
   background: var(--bg);
@@ -907,6 +908,8 @@ table.data td { padding-top: 16px; padding-bottom: 16px; }
   .chips .chip { flex: 0 0 auto; padding: 8px 10px; font-size: 11px; border-radius: 10px; white-space: nowrap; }
   .asset-card { padding: 16px; }
   .qa-tile:hover, .acc-card:hover, .acc-item.clickable:hover, .asset-card:hover { transform: none; box-shadow: var(--shadow); }
+  .qa-tile, .acc-card, .watch-card { touch-action: pan-y pinch-zoom; }
+  .qa-tile:active, .acc-card:active { transform: none; }
   .asset-card > .row { gap: 10px; align-items: center; }
   .asset-card .grow > .muted { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
   .asset-card .badges { gap: 5px; margin-top: 7px; }
