@@ -6,11 +6,13 @@ export interface DexToken {
   symbol: string;
   name: string;
   priceUsd: number | null;
+  imageUrl: string | null;
 }
 
 interface DexPair {
   baseToken: { address: string; symbol: string; name: string };
   priceUsd?: string;
+  info?: { imageUrl?: string };
 }
 
 /**
@@ -34,6 +36,7 @@ export async function fetchDexTokens(mints: string[]): Promise<Map<string, DexTo
           symbol: p.baseToken.symbol,
           name: p.baseToken.name,
           priceUsd: Number.isFinite(usd) ? usd : null,
+          imageUrl: typeof p.info?.imageUrl === 'string' && p.info.imageUrl.startsWith('https://') ? p.info.imageUrl : null,
         });
       }
     } catch {
@@ -65,7 +68,7 @@ export class DexScreenerPriceProvider implements PriceProvider {
     for (const r of rows) {
       const t = dex.get(r.provider_id);
       if (t?.priceUsd) {
-        out.push({ symbol: r.symbol, priceIdr: Math.max(1, Math.round(t.priceUsd * rate)), source: 'dexscreener' });
+        out.push({ symbol: r.symbol, priceIdr: Math.round(t.priceUsd * rate), source: 'dexscreener' });
       }
     }
     return out;

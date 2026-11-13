@@ -27,15 +27,15 @@ export class CircuitBreaker {
   }
 
   get current(): BreakerState {
-    if (this.state === 'open' && Date.now() - this.openedAt >= this.cooldownMs) {
-      this.state = 'half-open';
-    }
     return this.state;
   }
 
   /** True bila panggilan boleh jalan (closed, atau half-open trial). */
   allow(): boolean {
-    return this.current !== 'open';
+    if (this.state === 'open' && Date.now() - this.openedAt >= this.cooldownMs) {
+      this.state = 'half-open';
+    }
+    return this.state !== 'open';
   }
 
   recordSuccess(): void {
@@ -43,7 +43,9 @@ export class CircuitBreaker {
     this.state = 'closed';
   }
 
-  recordFailure(): void {
+  recordFailure(statusCode?: number): void {
+    // 4xx non-429 = data/request salah, bukan provider down → jangan hitung.
+    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500 && statusCode !== 429) return;
     this.failures += 1;
     if (this.failures >= this.threshold) {
       this.state = 'open';

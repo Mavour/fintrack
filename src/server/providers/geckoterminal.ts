@@ -71,7 +71,7 @@ export class GeckoTerminalPriceProvider implements PriceProvider {
         for (const r of batch) {
           const usd = Number(byAddr.get(r.provider_id)?.price_usd);
           if (Number.isFinite(usd) && usd > 0) {
-            out.push({ symbol: r.symbol, priceIdr: Math.max(1, Math.round(usd * rate)), source: 'geckoterminal' });
+            out.push({ symbol: r.symbol, priceIdr: Math.round(usd * rate), source: 'geckoterminal' });
           }
         }
       } catch {

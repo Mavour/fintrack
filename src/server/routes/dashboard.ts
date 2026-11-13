@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
-import { getDashboard } from '../services/dashboardService.js';
+import { getDashboard, getWealthTrend } from '../services/dashboardService.js';
 import { getPrices, getHistory } from '../providers/priceStore.js';
 import { backfillThinHistories } from '../providers/historyBackfill.js';
 import { refreshCrypto, refreshStocks } from '../providers/priceOrchestrator.js';
@@ -43,5 +43,13 @@ export function registerDashboardRoutes(app: FastifyInstance, db: Database.Datab
   // One-time all-time history backfill (also runs daily for thin histories).
   app.post('/api/prices/backfill', async () => {
     return { ok: true, backfilled: await backfillThinHistories(db) };
+  });
+
+  // Snapshot kekayaan harian untuk trendline (direkam scheduler + boot).
+  app.get('/api/wealth/trend', async (req) => {
+    const q = z.object({ days: z.coerce.number().int().min(2).max(365).default(90) }).parse(
+      (req as { query: unknown }).query,
+    );
+    return { points: getWealthTrend(db, q.days) };
   });
 }

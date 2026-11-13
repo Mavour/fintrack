@@ -3,13 +3,15 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeList, filterDust, mergeTokensAcrossWallets, usdToIdr } from '../src/server/providers/walletTypes.js';
+import { normalizeList, normalizeListStrict, filterDust, mergeTokensAcrossWallets, usdToIdr } from '../src/server/providers/walletTypes.js';
 import { JupiterPortfolioProvider } from '../src/server/providers/jupiterPortfolioV1.js';
 import { DebankProvider } from '../src/server/providers/debank.js';
 import { MeteoraDlmmProvider, meteoraDlmmPositions, meteoraToNormalized } from '../src/server/providers/meteora.js';
 import { OrcaStubProvider, RaydiumStubProvider } from '../src/server/providers/lpStubs.js';
 import { detectNetworkType, shortAddress } from '../src/server/services/address.js';
 import { createWallet, seedWallets, listWallets } from '../src/server/services/walletRegistry.js';
+import { resolveTokenIcons, readCachedIcons, __resetTokenMetaCache } from '../src/server/providers/tokenMeta.js';
+import { getWalletTokens } from '../src/server/services/portfolioService.js';
 import { syncWallet, checkResyncCooldown } from '../src/server/services/walletSync.js';
 import { listPositions, listLp, lpSummary, walletSyncHealth } from '../src/server/services/walletRead.js';
 
@@ -128,9 +130,12 @@ describe('provider normalization from fixtures', () => {
 });
 
 describe('contract: invalid responses rejected', () => {
-  it('non-conforming items throw controlled error', () => {
-    expect(() => normalizeList([{ chain_id: '', kind: 'nope', symbol: '' }], 'test')).toThrow(/tidak sesuai skema/);
-    expect(() => normalizeList([{ chain_id: 'solana', kind: 'token', symbol: 'SOL', amount: '1' }], 'test')).not.toThrow();
+  it('non-conforming items throw controlled error (strict)', () => {
+    expect(() => normalizeListStrict([{ chain_id: '', kind: 'nope', symbol: '' }], 'test')).toThrow(/tidak sesuai skema/);
+    expect(() => normalizeListStrict([{ chain_id: 'solana', kind: 'token', symbol: 'SOL', amount: '1' }], 'test')).not.toThrow();
+  });
+  it('sync path skips bad items instead of throwing', () => {
+    expect(normalizeList([{ chain_id: '', kind: 'nope', symbol: '' }], 'test')).toEqual([]);
   });
 });
 
@@ -170,6 +175,7 @@ describe('sync logic', () => {
       if (String(url).includes('api.mainnet-beta')) {
         return { ok: true, status: 200, json: async () => ({ result: { value: [] } }) };
       }
+      if (String(url).includes('api.jup.ag')) return { ok: true, status: 200, json: async () => ({ positions: [] }) };
       if (String(url).includes('meteora')) return { ok: true, status: 200, json: async () => [] };
       throw new Error(`unexpected ${url}`);
     }));
@@ -193,6 +199,7 @@ describe('sync logic', () => {
         return { ok: true, status: 200, json: async () => ({ positions: [{ symbol: 'SOL', uiAmount: 2, priceUsd: 100, valueUsd: 200 }] }) };
       }
       if (String(url).includes('api.mainnet-beta')) return { ok: true, status: 200, json: async () => ({ result: { value: [] } }) };
+      if (String(url).includes('api.jup.ag')) return { ok: true, status: 200, json: async () => ({ positions: [] }) };
       if (String(url).includes('meteora')) return { ok: true, status: 200, json: async () => [] };
       throw new Error('unexpected');
     }));
@@ -230,7 +237,7 @@ describe('sync logic', () => {
     const r = await syncWallet(db, w.id);
     expect(r.ok).toBe(false);
     expect(listPositions(db, { wallet_id: w.id, show_all: true }).length).toBeGreaterThan(0);
-    expect(walletSyncHealth(db).mode).toBe('live');
+    expect(walletSyncHealth(db).mode).toBe('stale');
     db.close();
   });
 
@@ -276,6 +283,52 @@ describe('sync logic', () => {
       `INSERT INTO sync_status (provider, wallet_id, last_success_at, updated_at) VALUES ('t', ?, datetime('now'), datetime('now'))`,
     ).run(w.id);
     expect(() => checkResyncCooldown(db, w.id, 30_000)).toThrow(/Tunggu/);
+    db.close();
+  });
+});
+
+describe('token icons', () => {
+  const MET = 'METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL';
+  const MET_ICON = 'https://assets.meteora.ag/met-token.svg';
+  afterEach(() => {
+    __resetTokenMetaCache();
+  });
+  it('resolve dari Jupiter verified list + cache disk', async () => {
+    const db = memDb();
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('api.jup.ag/tokens/v2/tag')) {
+        return { ok: true, status: 200, json: async () => [{ id: MET, symbol: 'MET', name: 'Meteora', icon: MET_ICON }] };
+      }
+      throw new Error('unexpected ' + url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const first = await resolveTokenIcons(db, [MET]);
+    expect(first.get(MET)).toBe(MET_ICON);
+    // Panggilan kedua: cache disk, tanpa fetch sama sekali.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('must not be called');
+    }));
+    const second = await resolveTokenIcons(db, [MET]);
+    expect(second.get(MET)).toBe(MET_ICON);
+    db.close();
+  });
+  it('getWalletTokens melampirkan mint + icon', () => {
+    const db = memDb();
+    const w = createWallet(db, 'S', SOL);
+    db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (?, 'solana', 'staking', 'jupiter', 'MET', 'Meteora', '10', 1, 10, ?)`,
+    ).run(w.id, JSON.stringify({ mint: MET }));
+    db.prepare(`INSERT INTO token_icons (mint, icon) VALUES (?, ?)`).run(MET, MET_ICON);
+    const { tokens } = getWalletTokens(db);
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0].mint).toBe(MET);
+    expect(tokens[0].icon).toBe(MET_ICON);
+    db.close();
+  });
+  it('tanpa cache icon null (frontend fallback)', () => {
+    const db = memDb();
+    expect(readCachedIcons(db, [MET]).size).toBe(0);
     db.close();
   });
 });

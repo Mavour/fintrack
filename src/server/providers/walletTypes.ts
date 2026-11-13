@@ -28,6 +28,7 @@ export interface WalletRef {
 
 export interface WalletProvider {
   readonly name: string;
+  readonly failedChains?: string[];
   fetchPositions(wallet: WalletRef): Promise<NormalizedPosition[]>;
 }
 
@@ -70,8 +71,8 @@ export function throwForStatus(res: Response, provider: string): void {
   throw err;
 }
 
-/** Validate every item; a non-conforming response is a controlled error, never a crash. */
-export function normalizeList(raw: unknown, provider: string): NormalizedPosition[] {
+/** Validate every item strictly; dipakai contract test. Jalur sync memakai versi lenient. */
+export function normalizeListStrict(raw: unknown, provider: string): NormalizedPosition[] {
   const arr = Array.isArray(raw) ? raw : [];
   const out: NormalizedPosition[] = [];
   for (const item of arr) {
@@ -82,6 +83,18 @@ export function normalizeList(raw: unknown, provider: string): NormalizedPositio
         { statusCode: 502 },
       );
     }
+    out.push(parsed.data);
+  }
+  return out;
+}
+
+/** Jalur sync: item rusak dilewati + warn (satu token aneh tak boleh buang 1 provider penuh). */
+export function normalizeList(raw: unknown, provider: string): NormalizedPosition[] {
+  const arr = Array.isArray(raw) ? raw : [];
+  const out: NormalizedPosition[] = [];
+  for (const item of arr) {
+    const parsed = NormalizedPositionSchema.safeParse(item);
+    if (!parsed.success) continue;
     out.push(parsed.data);
   }
   return out;
@@ -156,13 +169,16 @@ export function normalizeListLenient(
 /** Hash stabil snapshot untuk deteksi "identik → jangan tulis / jangan emit". */
 export function snapshotHash(positions: NormalizedPosition[]): string {
   const rows = positions
-    .map((p) => [p.chain_id, p.kind, p.protocol, p.symbol, p.amount, p.price_usd ?? '', p.value_usd ?? ''].join('|'))
+    .map((p) => [p.chain_id, p.kind, p.protocol, p.symbol, p.amount, p.price_usd ?? '', p.value_usd ?? '', JSON.stringify(p.meta ?? {})].join('|'))
     .sort();
-  let h = 2166136261;
   const s = rows.join('\n');
+  // FNV-1a 64-bit via BigInt (ruang 2^64, jauh dari kolisi 32-bit lama).
+  let h = 14695981039346656037n;
+  const prime = 1099511628211n;
+  const mask = (1n << 64n) - 1n;
   for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
+    h ^= BigInt(s.charCodeAt(i));
+    h = (h * prime) & mask;
   }
-  return (h >>> 0).toString(16);
+  return h.toString(16);
 }

@@ -19,10 +19,15 @@ cp .env.example .env   # isi APP_PASSWORD + SESSION_SECRET
 npm install
 npm test
 npm run build
-npm start              # http://localhost:3000
+npm start              # http://localhost:3100
 ```
 
-Dev: `npm run dev:server` + `npm run dev:web` (proxy /api → :3000).
+Dev: `npm run dev:server` + `npm run dev:web` (proxy /api → :3100).
+
+Port backend default **3100**. Saat memperbarui VPS yang sudah punya `.env`,
+ubah `PORT=3100` di file tersebut, lalu sesuaikan upstream Nginx/Caddy.
+PM2: `pm2 restart ecosystem.config.cjs --update-env`. Docker: publish
+`127.0.0.1:3100:3100` ke reverse proxy di host.
 
 ## Ubuntu VPS dari nol
 ```bash
@@ -57,6 +62,21 @@ Update: `git pull && npm ci && npm run build && pm2 restart dompet-saya`.
   diperbarui otomatis tiap 5 menit. Debu <$1 dilewati.
 
 ## Wallet tracker + LP (otomatis, read-only)
+- Elysium **Kinetiq mainnet (99901)** ikut dibaca untuk alamat EVM yang
+  terdaftar: native HYPE via RPC, kontrak ERC-20 dari riwayat explorer resmi,
+  lalu saldo `balanceOf` pada blok yang sama. Tidak menghitung saldo dari
+  penjumlahan transfer. Token tanpa harga ditandai dan tidak masuk total;
+  cakupan ini belum termasuk LP/DeFi Elysium.
+- Staking MET di program referral dibaca lewat posisi staking Jupiter.
+  Reward referral pending/claimable memerlukan sesi verifikasi wallet di
+  Meteora dan **belum termasuk total**. Pelacak ini tidak meminta tanda tangan.
+- Limit order mencakup input tersisa **dan hasil fill yang belum ditarik**.
+  Hasil fill tampil terpisah agar tidak tertukar dengan saldo wallet bebas.
+- Posisi LP bernilai dari Jupiter melengkapi DLMM Data API (termasuk DAMM v2,
+  sesuai cakupan Jupiter). Pool DLMM yang muncul di kedua sumber dihitung sekali.
+- Provider gagal mempertahankan posisi dan waktu sinkron terakhirnya. Kegagalan
+  parsial tampil tertunda; status sukses lama tidak menutupi error terbaru.
+
 - Daftarkan wallet di **Akun & Bank > Wallet** (label + alamat publik).
   Jaringan terdeteksi otomatis (Solana base58 / EVM `0x`). Satu alamat EVM
   berlaku untuk semua chain EVM. Tidak pernah meminta/menyimpan private key,

@@ -3,6 +3,7 @@ import { qtyTimesPriceIdr, plPercent, parseQty } from '../src/server/services/mo
 import { pruneHistory } from '../src/server/providers/priceStore.js';
 import { backfillSymbol } from '../src/server/providers/historyBackfill.js';
 import { diversificationScore, type AssetValuation, valuateAsset, getUnifiedPortfolio, getWalletTokens } from '../src/server/services/portfolioService.js';
+import { recordWealthSnapshot, getWealthTrend } from '../src/server/services/dashboardService.js';
 import { createFxRateProvider } from '../src/server/providers/fxRate.js';
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -279,6 +280,34 @@ describe('history all-time', () => {
     db.prepare(`INSERT INTO asset_map (symbol, provider, provider_id) VALUES ('TST','coingecko','test-coin')`).run();
     const n = await backfillSymbol(db, 'TST');
     expect(n).toBe(2);
+    db.close();
+  });
+});
+
+describe('wealth snapshots', () => {
+  function memDb2() {
+    const db = new Database(':memory:');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    db.exec(fs.readFileSync(path.join(here, '..', 'src', 'server', 'db', 'schema.sql'), 'utf-8'));
+    db.prepare(`INSERT INTO fx_cache (pair, rate) VALUES ('USDIDR', 16000)`).run();
+    return db;
+  }
+
+  it('record idempoten per hari + trend terurut', () => {
+    const db = memDb2();
+    db.prepare(`INSERT INTO accounts (name, type, balance_idr) VALUES ('BCA','bank',1000)`).run();
+    recordWealthSnapshot(db);
+    recordWealthSnapshot(db); // idempoten: tetap 1 baris
+    let rows = db.prepare('SELECT * FROM wealth_history').all() as Array<{ day: string; total_wealth_idr: number }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].total_wealth_idr).toBe(1000);
+    // Hari lalu manual → trend 2 titik terurut menaik.
+    const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    db.prepare(`INSERT INTO wealth_history (day, total_wealth_idr, invest_value_idr, cash_idr) VALUES (?,?,?,?)`).run(y, 900, 0, 900);
+    const trend = getWealthTrend(db, 90);
+    expect(trend).toHaveLength(2);
+    expect(trend[0].day).toBe(y);
+    expect(trend[1].total_wealth_idr).toBe(1000);
     db.close();
   });
 });

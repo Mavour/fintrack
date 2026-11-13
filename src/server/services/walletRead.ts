@@ -85,17 +85,25 @@ export interface SyncStatusRow {
 
 export function getSyncStatus(db: Database.Database, walletId?: number): SyncStatusRow[] {
   if (walletId) return db.prepare('SELECT * FROM sync_status WHERE wallet_id = ? ORDER BY provider').all(walletId) as SyncStatusRow[];
-  return db.prepare('SELECT * FROM sync_status ORDER BY updated_at DESC').all() as SyncStatusRow[];
+  return db.prepare(`SELECT * FROM sync_status WHERE wallet_id IS NOT NULL
+    OR rowid IN (SELECT MAX(rowid) FROM sync_status WHERE wallet_id IS NULL GROUP BY provider)
+    ORDER BY updated_at DESC`).all() as SyncStatusRow[];
 }
 
 /** "Sinkron Live" hanya bila sync wallet terakhir berhasil < 15 menit. */
 export function walletSyncHealth(db: Database.Database, liveMs = 15 * 60 * 1000): { mode: 'live' | 'stale' | 'empty'; last_success_at: string | null } {
-  const row = db.prepare(`SELECT MAX(last_success_at) AS last_at FROM sync_status WHERE last_success_at IS NOT NULL`).get() as {
-    last_at: string | null;
-  };
-  if (!row?.last_at) return { mode: 'empty', last_success_at: null };
-  const age = Date.now() - new Date(row.last_at.endsWith('Z') ? row.last_at : row.last_at + 'Z').getTime();
-  return { mode: age < liveMs ? 'live' : 'stale', last_success_at: row.last_at };
+  const rows = getSyncStatus(db).filter((s) => s.wallet_id !== null &&
+    !['orca-stub', 'raydium-stub', 'debank-budget'].includes(s.provider) &&
+    !(s.provider === 'jupiter-portfolio-v1' && !process.env.JUPITER_API_KEY));
+  const latest = rows.map((s) => s.last_success_at).filter((s): s is string => !!s).sort().pop() ?? null;
+  if (!latest) return { mode: 'empty', last_success_at: null };
+  const wallets = db.prepare('SELECT id FROM wallets').all() as Array<{ id: number }>;
+  const live = wallets.every((w) => rows.some((s) => s.wallet_id === w.id)) && rows.every((s) => {
+    if (s.last_error || !s.last_success_at) return false;
+    const age = Date.now() - new Date(s.last_success_at.endsWith('Z') ? s.last_success_at : s.last_success_at + 'Z').getTime();
+    return Number.isFinite(age) && age >= 0 && age < liveMs;
+  });
+  return { mode: live ? 'live' : 'stale', last_success_at: latest };
 }
 
 function safeJson(s: string): Record<string, unknown> {

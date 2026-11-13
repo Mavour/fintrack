@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { parseQty, qtyTimesPriceIdr, costBasis, plNominal, plPercent } from './money.js';
 import { getCachedUsdIdr } from '../providers/fxRate.js';
+import { readCachedIcons } from '../providers/tokenMeta.js';
 import { Decimal } from 'decimal.js';
 
 export const AssetTypeSchema = z.enum(['crypto', 'saham', 'reksadana']);
@@ -155,7 +156,61 @@ export function valuateAsset(
 }
 
 export function listValuations(db: Database.Database, type?: AssetType): AssetValuation[] {
-  return listAssets(db, type).map((a) => valuateAsset(db, a));
+  const assets = listAssets(db, type);
+  if (assets.length === 0) return [];
+  // Batch: 1 query price_cache + 1 query fx (hindari N+1 2N+1 query).
+  const symbols = [...new Set(assets.map((a) => a.symbol))];
+  const priceMap = new Map<string, { price_idr: number; source: string; fetched_at: string }>();
+  for (let i = 0; i < symbols.length; i += 200) {
+    const chunk = symbols.slice(i, i + 200);
+    const found = db.prepare(`SELECT symbol, price_idr, source, fetched_at FROM price_cache WHERE symbol IN (${chunk.map(() => '?').join(',')})`).all(...chunk) as Array<{ symbol: string; price_idr: number; source: string; fetched_at: string }>;
+    for (const f of found) priceMap.set(f.symbol, f);
+  }
+  const rate = getCachedUsdIdr(db);
+  const nowMs = Date.now();
+  return assets.map((a) => valuateAssetCached(a, priceMap.get(a.symbol), rate, nowMs));
+}
+
+function valuateAssetCached(
+  asset: Asset,
+  cached: { price_idr: number; source: string; fetched_at: string } | undefined,
+  rate: number | null,
+  nowMs: number,
+): AssetValuation {
+  const buyKnown = asset.avg_buy_price_idr > 0;
+  const cost = buyKnown ? costBasis(asset.qty, asset.avg_buy_price_idr) : 0;
+  if (!cached) {
+    return {
+      ...asset,
+      current_price_idr: null,
+      current_value_idr: null,
+      current_price_usd: null,
+      current_value_usd: null,
+      cost_idr: cost,
+      pl_idr: null,
+      pl_percent: null,
+      price_source: null,
+      price_fetched_at: null,
+      is_stale: true,
+    };
+  }
+  const currentValue = qtyTimesPriceIdr(asset.qty, cached.price_idr);
+  const priceUsd = asset.type !== 'crypto' || !rate ? null : new Decimal(cached.price_idr).div(rate).toNumber();
+  const valueUsd = priceUsd === null ? null : parseQty(asset.qty).times(priceUsd).toNumber();
+  const stale = nowMs - new Date(cached.fetched_at + 'Z').getTime() > STALE_THRESHOLD_MS;
+  return {
+    ...asset,
+    current_price_idr: cached.price_idr,
+    current_value_idr: currentValue,
+    current_price_usd: priceUsd,
+    current_value_usd: valueUsd,
+    cost_idr: cost,
+    pl_idr: buyKnown ? plNominal(currentValue, cost) : null,
+    pl_percent: buyKnown ? plPercent(currentValue, cost) : null,
+    price_source: cached.source,
+    price_fetched_at: cached.fetched_at,
+    is_stale: stale,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -226,18 +281,57 @@ export interface WalletTokenV {
   has_cost: boolean;
   chains: string[];
   wallets: string[];
+  /** Alamat per wallet (sejajar dengan `wallets`, untuk link detail onchain). */
+  wallet_addrs: string[];
+  /** Mint representatif (untuk logo). Null bila tak diketahui. */
+  mint: string | null;
+  /** URL logo resmi (Jupiter verified → DexScreener). Null = frontend fallback. */
+  icon: string | null;
+}
+
+/** Limit order / posisi DeFi wallet (kind='defi'): dana dikunci di order. */
+export interface DefiV {
+  source: 'wallet';
+  type: 'crypto';
+  symbol: string;
+  name: string;
+  amount: string;
+  price_usd: number | null;
+  value_usd: number | null;
+  price_idr: number | null;
+  value_idr: number | null;
+  output_symbol: string | null;
+  order_side?: 'input' | 'output';
+  filled_pct: number | null;
+  protocol: string;
+  chains: string[];
+  wallets: string[];
+  /** Rincian per wallet pembentuk baris gabungan (untuk popup). */
+  breakdown: Array<{
+    wallet: string;
+    address: string;
+    amount: string;
+    value_usd: number | null;
+    value_idr: number | null;
+    filled_pct: number | null;
+  }>;
 }
 
 export interface ManualAssetV extends AssetValuation {
   source: 'manual';
+  /** URL logo resmi bila mint dikenal. Null = frontend fallback. */
+  icon: string | null;
 }
 
 export interface UnifiedPortfolio {
+  unpriced_manual_assets: number;
   assets: ManualAssetV[];
   wallet_tokens: WalletTokenV[];
   /** Token wallet disembunyikan dari Portofolio (tanpa harga atau < $1).
    *  Daftarnya hanya tampil di Akun & Bank > Wallet. */
   hidden_tokens: number;
+  /** Limit order / DeFi wallet (terpisah dari token agar terlihat sebagai order). */
+  wallet_defi: DefiV[];
   total_value_idr: number;
   total_cost_idr: number;
   floating_pl_idr: number;
@@ -245,6 +339,10 @@ export interface UnifiedPortfolio {
   cost_basis: Record<string, number>;
   diversification_score: number;
   diversification_label: string;
+  /** Nilai posisi LP & DeFi wallet (sudah termasuk di total_value_idr). */
+  lp_value_idr: number;
+  /** Fees LP belum diklaim (bagian dari lp_value_idr). */
+  lp_fees_idr: number;
 }
 
 export interface WalletMatch {
@@ -324,16 +422,16 @@ export function getWalletTokens(
   const rate = getCachedUsdIdr(db);
   const basis = listCostBasis(db);
   const minUsd = opts.minUsd ?? 1;
-  const groups = new Map<string, { name: string; amount: InstanceType<typeof Decimal>; valueUsd: number | null; chains: Set<string>; wallets: Set<string> }>();
+  const groups = new Map<string, { name: string; amount: InstanceType<typeof Decimal>; valueUsd: number | null; chains: Set<string>; wallets: Set<string>; mint: string | null; addrByLabel: Map<string, string> }>();
   try {
     const rows = db.prepare(
-      `SELECT UPPER(wp.symbol) AS sym, wp.name, wp.amount, wp.value_usd, wp.chain_id, w.label AS label
+      `SELECT UPPER(wp.symbol) AS sym, wp.name, wp.amount, wp.value_usd, wp.chain_id, wp.meta, w.label AS label, w.address AS address
        FROM wallet_positions wp JOIN wallets w ON w.id = wp.wallet_id
        WHERE wp.kind IN ('token','staking')`,
-    ).all() as Array<{ sym: string; name: string; amount: string; value_usd: number | null; chain_id: string; label: string }>;
+    ).all() as Array<{ sym: string; name: string; amount: string; value_usd: number | null; chain_id: string; meta: string; label: string; address: string }>;
     for (const r of rows) {
       if (!groups.has(r.sym)) {
-        groups.set(r.sym, { name: r.name, amount: new Decimal(0), valueUsd: null, chains: new Set(), wallets: new Set() });
+        groups.set(r.sym, { name: r.name, amount: new Decimal(0), valueUsd: null, chains: new Set(), wallets: new Set(), mint: null, addrByLabel: new Map() });
       }
       const g = groups.get(r.sym)!;
       try {
@@ -342,12 +440,22 @@ export function getWalletTokens(
         // Qty rusak dilewati, nilai tetap dijumlah bila ada.
       }
       if (r.value_usd !== null && r.value_usd !== undefined) g.valueUsd = (g.valueUsd ?? 0) + r.value_usd;
+      if (!g.mint) {
+        try {
+          const m = (JSON.parse(r.meta) as Record<string, unknown>)?.mint;
+          if (typeof m === 'string' && m.length > 0) g.mint = m;
+        } catch {
+          // Meta rusak diabaikan.
+        }
+      }
       g.chains.add(r.chain_id);
       g.wallets.add(r.label || 'Wallet');
+      if (!g.addrByLabel.has(r.label || 'Wallet') && r.address) g.addrByLabel.set(r.label || 'Wallet', r.address);
     }
   } catch {
     return { tokens: [], hiddenCount: 0 };
   }
+  const icons = readCachedIcons(db, [...groups.values()].map((g) => g.mint).filter((m): m is string => !!m));
   const out: WalletTokenV[] = [];
   let hiddenCount = 0;
   for (const [sym, g] of groups) {
@@ -359,9 +467,9 @@ export function getWalletTokens(
       hiddenCount++;
       continue;
     }
-    const priceUsd = (g.valueUsd as number) / amtNum;
-    const valueIdr = rate !== null && rate !== undefined ? Math.round((g.valueUsd as number) * rate) : null;
-    const unitIdr = valueIdr !== null && amtNum > 0 ? Math.round(valueIdr / amtNum) : null;
+    const priceUsd = new Decimal(g.valueUsd as number).div(amtNum).toNumber();
+    const valueIdr = rate !== null && rate !== undefined ? new Decimal(g.valueUsd as number).times(rate).toDecimalPlaces(0, 4).toNumber() : null;
+    const unitIdr = valueIdr !== null && amtNum > 0 ? new Decimal(valueIdr).div(amtNum).toDecimalPlaces(0, 4).toNumber() : null;
     const buy = basis[sym];
     // P/L HANYA bila user mengisi cost basis. Tanpa itu: cost & P/L null → UI "-".
     const hasCost = buy !== undefined && buy !== null;
@@ -384,17 +492,140 @@ export function getWalletTokens(
       has_cost: hasCost,
       chains: [...g.chains],
       wallets: [...g.wallets],
+      wallet_addrs: [...g.wallets].map((l) => g.addrByLabel.get(l) ?? ''),
+      mint: g.mint,
+      icon: g.mint ? (icons.get(g.mint) ?? null) : null,
     });
   }
   return { tokens: out.sort((a, b) => (b.value_idr ?? 0) - (a.value_idr ?? 0)), hiddenCount };
 }
 
-export function getUnifiedPortfolio(db: Database.Database, type?: AssetType): UnifiedPortfolio {
+/** Agregasi posisi DeFi wallet (limit order dkk) per pair per arah.
+ *  Satu baris = satu pair input→output lintas wallet; klik baris membuka
+ *  popup rincian per wallet (breakdown). TIDAK digabung by simbol input:
+ *  semua order USDC→X akan lenyap maknanya bila disatukan jadi "USDC". */
+export function getWalletDefi(
+  db: Database.Database,
+  opts: { minUsd?: number } = {},
+): { tokens: DefiV[]; hiddenCount: number } {
+  const rate = getCachedUsdIdr(db);
+  const minUsd = opts.minUsd ?? 1;
+  const groups = new Map<
+    string,
+    {
+      name: string; amount: InstanceType<typeof Decimal>; valueUsd: number | null;
+      output: string | null; side: 'input' | 'output'; filled: { sum: number; weight: number } | null; protocol: string;
+      chains: Set<string>; wallets: Set<string>; symbol: string;
+      parts: Array<{ wallet: string; address: string; amount: string; valueUsd: number | null; filled: number | null }>;
+    }
+  >();
+  try {
+    const rows = db.prepare(
+      `SELECT UPPER(wp.symbol) AS sym, wp.name, wp.amount, wp.value_usd, wp.chain_id,
+              wp.protocol, wp.meta, w.label AS label, w.address AS address
+       FROM wallet_positions wp JOIN wallets w ON w.id = wp.wallet_id
+       WHERE wp.kind = 'defi'`,
+    ).all() as Array<{
+      sym: string; name: string; amount: string; value_usd: number | null;
+      chain_id: string; protocol: string; meta: string; label: string; address: string;
+    }>;
+    for (const r of rows) {
+      const m = metaJson(r.meta);
+      const outSym = typeof m.output_symbol === 'string' && m.output_symbol ? m.output_symbol.toUpperCase() : '?';
+      const side = m.order_side === 'output' ? 'output' : 'input';
+      // Kunci per pair input→output lintas wallet (popup memecah per wallet).
+      const key = `${r.chain_id}::${r.protocol}::${r.sym}::${outSym}::${side}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          name: r.name, amount: new Decimal(0), valueUsd: null,
+          output: outSym === '?' ? null : outSym, side, filled: null, protocol: r.protocol,
+          chains: new Set(), wallets: new Set(), symbol: r.sym, parts: [],
+        });
+      }
+      const g = groups.get(key)!;
+      let partAmt = '0';
+      try {
+        const q = parseQty(r.amount);
+        g.amount = g.amount.plus(q);
+        partAmt = q.toString();
+      } catch {
+        // Qty rusak dilewati, nilai tetap dijumlah bila ada.
+      }
+      if (r.value_usd !== null && r.value_usd !== undefined) g.valueUsd = (g.valueUsd ?? 0) + r.value_usd;
+      const filled = typeof m.filled_pct === 'number' ? m.filled_pct : null;
+      if (filled !== null) {
+        // Rata-rata tertimbang nilai (order lebih besar lebih menentukan).
+        const w = r.value_usd ?? 0;
+        g.filled = { sum: (g.filled?.sum ?? 0) + filled * w, weight: (g.filled?.weight ?? 0) + w };
+      }
+      g.parts.push({
+        wallet: r.label || 'Wallet',
+        address: r.address ?? '',
+        amount: partAmt,
+        valueUsd: r.value_usd ?? null,
+        filled,
+      });
+      g.chains.add(r.chain_id);
+      g.wallets.add(r.label || 'Wallet');
+    }
+  } catch {
+    return { tokens: [], hiddenCount: 0 };
+  }
+  const out: DefiV[] = [];
+  let hiddenCount = 0;
+  for (const g of groups.values()) {
+    const sym = g.symbol;
+    const amtNum = g.amount.toNumber();
+    const hasValue = g.valueUsd !== null && g.valueUsd > 0;
+    if (!hasValue || (g.valueUsd as number) < minUsd) {
+      hiddenCount++;
+      continue;
+    }
+    const priceUsd = new Decimal(g.valueUsd as number).div(amtNum).toNumber();
+    const valueIdr = rate !== null && rate !== undefined ? new Decimal(g.valueUsd as number).times(rate).toDecimalPlaces(0, 4).toNumber() : null;
+    const unitIdr = valueIdr !== null && amtNum > 0 ? new Decimal(valueIdr).div(amtNum).toDecimalPlaces(0, 4).toNumber() : null;
+    const idrOf = (v: number | null): number | null =>
+      v !== null && rate !== null && rate !== undefined ? new Decimal(v).times(rate).toDecimalPlaces(0, 4).toNumber() : null;
+    out.push({
+      source: 'wallet',
+      type: 'crypto',
+      symbol: sym,
+      name: g.name,
+      amount: g.amount.toString(),
+      price_usd: priceUsd,
+      value_usd: g.valueUsd,
+      price_idr: unitIdr,
+      value_idr: valueIdr,
+      output_symbol: g.output,
+      order_side: g.side,
+      filled_pct: g.filled && g.filled.weight > 0 ? g.filled.sum / g.filled.weight : null,
+      protocol: g.protocol,
+      chains: [...g.chains],
+      wallets: [...g.wallets],
+      breakdown: g.parts.map((p) => ({
+        wallet: p.wallet,
+        address: p.address,
+        amount: p.amount,
+        value_usd: p.valueUsd,
+        value_idr: idrOf(p.valueUsd),
+        filled_pct: p.filled,
+      })),
+    });
+  }
+  return { tokens: out.sort((a, b) => (b.value_idr ?? 0) - (a.value_idr ?? 0)), hiddenCount };
+}
+
+export function getUnifiedPortfolio(db: Database.Database, type?: AssetType, opts: { readOnly?: boolean } = {}): UnifiedPortfolio {
   const vals = listValuations(db, type);
   const index = getWalletIndex(db);
   const basis = listCostBasis(db);
-  syncSupersedeFlags(db, index);
+  if (!opts.readOnly) syncSupersedeFlags(db, index);
+  const manualIcons = readCachedIcons(
+    db,
+    vals.filter((v) => v.type === 'crypto' && !!v.mint).map((v) => v.mint as string),
+  );
   const assets: ManualAssetV[] = [];
+  let unpricedManualAssets = 0;
   for (const v of vals) {
     // Duplikat: manual sama dengan posisi wallet (chain + mint/simbol sama) →
     // disembunyikan total (tanpa badge/tombol Hapus/teks "dikecualikan").
@@ -405,13 +636,19 @@ export function getUnifiedPortfolio(db: Database.Database, type?: AssetType): Un
     if (superseded) continue;
     // Filter token: wajib ada harga; crypto bernilai ≥ $1 (LP legacy dikecualikan).
     const isLp = v.symbol.startsWith('LP-');
-    if (v.current_price_idr === null) continue;
+    if (v.current_price_idr === null) {
+      if (new Decimal(v.qty).gt(0)) unpricedManualAssets++;
+      continue;
+    }
     if (v.type === 'crypto' && !isLp && v.current_value_usd !== null && v.current_value_usd < 1) continue;
-    assets.push({ ...v, source: 'manual' });
+    assets.push({ ...v, source: 'manual', icon: v.mint ? (manualIcons.get(v.mint) ?? null) : null });
   }
   const wt = !type || type === 'crypto' ? getWalletTokens(db) : { tokens: [], hiddenCount: 0 };
   const walletTokens = wt.tokens;
-  const hiddenTokens = wt.hiddenCount;
+  let hiddenTokens = wt.hiddenCount;
+  const defi = !type || type === 'crypto' ? getWalletDefi(db) : { tokens: [], hiddenCount: 0 };
+  const walletDefi = defi.tokens;
+  hiddenTokens += defi.hiddenCount;
 
   let totalValue = 0;
   let totalCost = 0;
@@ -429,17 +666,48 @@ export function getUnifiedPortfolio(db: Database.Database, type?: AssetType): Un
   for (const w of walletTokens) {
     add('crypto', w.value_idr, w.cost_idr, w.pl_idr);
   }
+  for (const d of walletDefi) {
+    // Dana dikunci di order: masuk total & bucket crypto, tanpa modal/P/L.
+    add('crypto', d.value_idr, null, null);
+  }
+  // LP & DeFi wallet (tabel lp_positions) ikut total — sebelumnya hilang dari
+  // Total Investasi. Masuk bucket crypto. Cost tidak diketahui → P/L LP = null
+  // (tidak menambah modal maupun P/L, hanya nilai).
+  let lpValueIdr = 0;
+  let lpFeesIdr = 0;
+  if (!type || type === 'crypto') {
+    try {
+      const lp = db.prepare(
+        `SELECT COALESCE(SUM(COALESCE(position_value_usd,0)),0) AS v,
+                COALESCE(SUM(COALESCE(unclaimed_fees_usd,0)),0) AS f
+         FROM lp_positions`,
+      ).get() as { v: number; f: number };
+      const rate = getCachedUsdIdr(db);
+      if (rate) {
+        lpValueIdr = Math.round((lp.v + lp.f) * rate);
+        lpFeesIdr = Math.round(lp.f * rate);
+      }
+    } catch {
+      // Tabel belum ada (DB lama) — LP dianggap nol.
+    }
+    totalValue += lpValueIdr;
+    byType.crypto = (byType.crypto ?? 0) + lpValueIdr;
+  }
 
-  // Diversifikasi dari baris yang dihitung (manual inklusi + token wallet).
+  // Diversifikasi dari baris yang dihitung (manual inklusi + token wallet + LP).
   const divInput = [
     ...assets.map((a) => ({ current_value_idr: a.current_value_idr })),
     ...walletTokens.map((w) => ({ current_value_idr: w.value_idr })),
+    ...walletDefi.map((d) => ({ current_value_idr: d.value_idr })),
+    ...(lpValueIdr > 0 ? [{ current_value_idr: lpValueIdr }] : []),
   ];
   const score = diversificationScore(divInput as AssetValuation[]);
   return {
+    unpriced_manual_assets: unpricedManualAssets,
     assets,
     wallet_tokens: walletTokens,
     hidden_tokens: hiddenTokens,
+    wallet_defi: walletDefi,
     total_value_idr: totalValue,
     total_cost_idr: totalCost,
     floating_pl_idr: plSum,
@@ -447,6 +715,8 @@ export function getUnifiedPortfolio(db: Database.Database, type?: AssetType): Un
     cost_basis: basis,
     diversification_score: score,
     diversification_label: diversificationLabel(score),
+    lp_value_idr: lpValueIdr,
+    lp_fees_idr: lpFeesIdr,
   };
 }
 

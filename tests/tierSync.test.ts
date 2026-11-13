@@ -11,7 +11,7 @@ import {
   snapshotHash,
 } from '../src/server/providers/walletTypes.js';
 import { nextThrottleUp, nextThrottleDown, dailyProjection, unitsUsedLast24h } from '../src/server/services/debankMeter.js';
-import { commitPositions, syncWallet, checkGlobalResyncCooldown } from '../src/server/services/walletSync.js';
+import { commitPositions, syncWallet, checkGlobalResyncCooldown, checkManualSyncCooldown, markManualSync, manualSyncKeyWallet, manualSyncKeyAll } from '../src/server/services/walletSync.js';
 import { refreshWalletPrices } from '../src/server/services/priceTier.js';
 import { emitSyncDone, sseClientCount, minutesSinceLastClient, resetSseHub, touchSseClient } from '../src/server/services/sse.js';
 import { isIdleMode } from '../src/server/services/tierScheduler.js';
@@ -61,6 +61,7 @@ describe('circuit breaker', () => {
   });
 
   it('breaker registry dipakai syncWallet (provider down di-skip)', async () => {
+    process.env.JUPITER_API_KEY = 'k';
     const db = memDb();
     const w = createWallet(db, 'S', SOL);
     // Buka circuit jupiter + rpc + meteora secara manual.
@@ -181,7 +182,8 @@ describe('hash-skip + guard drop 90%', () => {
 });
 
 describe('throttle ladder DeBank', () => {
-  it('naik bertahap 15→30→60→300→600, mentok 600', () => {
+  it('naik bertahap 10→15→30→60→300→600, mentok 600', () => {
+    expect(nextThrottleUp(10)).toBe(15);
     expect(nextThrottleUp(15)).toBe(30);
     expect(nextThrottleUp(30)).toBe(60);
     expect(nextThrottleUp(300)).toBe(600);
@@ -191,7 +193,8 @@ describe('throttle ladder DeBank', () => {
   it('turun bertahap', () => {
     expect(nextThrottleDown(600)).toBe(300);
     expect(nextThrottleDown(30)).toBe(15);
-    expect(nextThrottleDown(15)).toBe(15);
+    expect(nextThrottleDown(15)).toBe(10);
+    expect(nextThrottleDown(10)).toBe(10);
   });
   it('proyeksi dari pengukuran nyata', () => {
     const db = memDb();
@@ -237,6 +240,33 @@ describe('tier harga', () => {
     expect(listPositions(db, { wallet_id: w.id, show_all: true })[0].price_usd).toBe(1);
     db.close();
   });
+
+  it('CoinGecko 429 → fallback DexScreener menghargai kontrak EVM', async () => {
+    const db = memDb();
+    const w = createWallet(db, 'E', '0x57843c3a9d30c55ad5f971a3e42df9e507fb4ffd', 'evm');
+    db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (?, 'eth', 'token', 'evm-rpc', 'ETH', 'Ethereum Native', '0.0128', NULL, NULL, ?)`,
+    ).run(w.id, JSON.stringify({ token_id: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('coingecko')) return resp(429);
+        if (String(url).includes('dexscreener')) {
+          return resp(200, [
+            { baseToken: { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' }, priceUsd: '2558.14' },
+          ]);
+        }
+        return resp(500);
+      }),
+    );
+    const out = await refreshWalletPrices(db);
+    expect(out.updated).toBe(1);
+    const row = listPositions(db, { wallet_id: w.id, show_all: true })[0];
+    expect(row.price_usd).toBeCloseTo(2558.14, 2);
+    expect(row.value_usd).toBeCloseTo(0.0128 * 2558.14, 2);
+    db.close();
+  });
 });
 
 describe('SSE hub + idle', () => {
@@ -260,6 +290,19 @@ describe('cooldown global sync-all', () => {
     const db = memDb();
     db.prepare(`INSERT INTO sync_status (provider, wallet_id, updated_at) VALUES ('t', NULL, datetime('now'))`).run();
     expect(() => checkGlobalResyncCooldown(db, 30_000)).toThrow(/Tunggu/);
+    db.close();
+  });
+
+  it('cooldown manual hanya dari klik manual, bukan dari tier otomatis', () => {
+    const db = memDb();
+    // Belum pernah klik → lolos.
+    expect(() => checkManualSyncCooldown(db, manualSyncKeyWallet(7), 30_000)).not.toThrow();
+    markManualSync(db, manualSyncKeyWallet(7));
+    // Klik lagi langsung → 429 dengan hitungan detik.
+    expect(() => checkManualSyncCooldown(db, manualSyncKeyWallet(7), 30_000)).toThrow(/Tunggu \d+ detik/);
+    // Wallet lain tidak ikut kena.
+    expect(() => checkManualSyncCooldown(db, manualSyncKeyWallet(8), 30_000)).not.toThrow();
+    expect(() => checkManualSyncCooldown(db, manualSyncKeyAll, 30_000)).not.toThrow();
     db.close();
   });
 });

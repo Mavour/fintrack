@@ -28,17 +28,20 @@ interface BsToken {
 /**
  * Fetch ERC-20 + native holdings of an EVM address. Fully keyless.
  * Only public address data is ever requested — never keys or signatures.
+ * `baseOverride` (opsional) mengganti host explorer untuk chain ini
+ * (mis. bila instance publik default di-rate-limit; via env per chain).
  */
-export async function fetchEvmHoldings(address: string, chain: string): Promise<ChainHolding[]> {
+export async function fetchEvmHoldings(address: string, chain: string, baseOverride?: string): Promise<ChainHolding[]> {
   if (!isValidEvmAddress(address)) throw Object.assign(new Error('Alamat EVM tidak valid'), { statusCode: 400 });
   const ex = EXPLORERS[chain];
   if (!ex) throw Object.assign(new Error(`Chain tidak didukung: ${chain}`), { statusCode: 400 });
+  const base = baseOverride ?? ex.base;
 
   const out: ChainHolding[] = [];
   // Native coin balance (wei -> units).
   try {
     const r = await withRetry(() =>
-      fetchWithTimeout(`${ex.base}?module=account&action=balance&address=${address}`, 20_000),
+      fetchWithTimeout(`${base}?module=account&action=balance&address=${address}`, 20_000),
     );
     const j = (await r.json()) as { status?: string; result?: string };
     if (j.result && j.result !== '0') {
@@ -50,14 +53,16 @@ export async function fetchEvmHoldings(address: string, chain: string): Promise<
   }
 
   const res = await withRetry(() =>
-    fetchWithTimeout(`${ex.base}?module=account&action=tokenlist&address=${address}`, 25_000),
+    fetchWithTimeout(`${base}?module=account&action=tokenlist&address=${address}`, 25_000),
   );
   if (!res.ok) throw new Error(`Explorer HTTP ${res.status}`);
   const json = (await res.json()) as { status?: string; result?: BsToken[] | string };
-  const list = Array.isArray(json.result) ? json.result : [];
+  if (!Array.isArray(json.result)) throw new Error('Explorer token list tidak valid — snapshot lama dipertahankan');
+  const list = json.result;
   for (const t of list) {
     if (!t.balance || t.balance === '0') continue;
-    const dec = Number(t.decimals) || 18;
+    const dec = Number(t.decimals);
+    if (!Number.isInteger(dec) || dec < 0 || dec > 255) throw new Error('Explorer token decimals tidak valid');
     const qty = new Decimal(t.balance).div(new Decimal(10).pow(dec)).toString();
     if (qty === '0') continue;
     out.push({ symbol: (t.symbol || '???').toUpperCase(), name: t.name || 'Token EVM', qty, ref: t.contractAddress, decimals: dec, mintSource: 'unknown' });

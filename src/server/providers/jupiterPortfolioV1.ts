@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { providerFetch, normalizeList, throwForStatus, type WalletProvider, type WalletRef, type NormalizedPosition } from './walletTypes.js';
+import { providerFetch, normalizeListLenient, throwForStatus, type WalletProvider, type WalletRef, type NormalizedPosition } from './walletTypes.js';
 import { logger } from '../logger.js';
 import { redactAddress } from '../services/address.js';
 
@@ -95,6 +95,8 @@ export class JupiterPortfolioProvider implements WalletProvider {
       })),
     ];
     logger.info({ wallet: redactAddress(wallet.address), count: raw.length }, 'jupiter v1 positions fetched');
-    return normalizeList(raw, this.name);
+    const lenient = normalizeListLenient(raw, this.name, (m) => logger.warn(m));
+    if (lenient.skipped > 0) logger.warn({ skipped: lenient.skipped }, 'jupiter v1: item rusak dilewati');
+    return lenient.positions;
   }
 }

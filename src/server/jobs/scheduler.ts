@@ -2,9 +2,9 @@ import cron from 'node-cron';
 import type Database from 'better-sqlite3';
 import { refreshCrypto, refreshStocks, type OrchestratorOpts } from '../providers/priceOrchestrator.js';
 import { refreshLpPositions } from '../services/lpService.js';
-import { syncAllWallets } from '../services/walletSync.js';
 import { backfillThinHistories } from '../providers/historyBackfill.js';
 import { verifyMetMapping } from '../providers/coingecko.js';
+import { recordWealthSnapshot } from '../services/dashboardService.js';
 import { logger } from '../logger.js';
 
 function scheduleSafe(expr: string, fallback: string): string {
@@ -24,13 +24,16 @@ export function startScheduler(db: Database.Database, opts: OrchestratorOpts): v
   cron.schedule('*/5 * * * *', () => {
     refreshLpPositions(db).catch((e) => logger.error({ err: e }, 'LP job failed'));
   });
-  // Wallet tracker: Solana 5 min, EVM 10 min (overridable via .env).
-  // Partial failure is isolated per provider inside syncWallet.
-  cron.schedule(scheduleSafe(process.env.WALLET_SOLANA_CRON ?? '*/5 * * * *', '*/5 * * * *'), () => {
-    syncAllWallets(db, 'solana').catch((e) => logger.error({ err: e }, 'solana wallet job failed'));
-  });
-  cron.schedule(scheduleSafe(process.env.WALLET_EVM_CRON ?? '*/10 * * * *', '*/10 * * * *'), () => {
-    syncAllWallets(db, 'evm').catch((e) => logger.error({ err: e }, 'evm wallet job failed'));
+  // Wallet tracker: tier scheduler (15 dtk) adalah SATU-SATUNYA penulis wallet.
+  // Cron legacy syncAllWallets dihapus agar tidak race DELETE/INSERT dengan tier
+  // (interleave scope 'all' vs 'solana/evm/lp' bisa menghapus baris scope lain).
+  // Snapshot kekayaan harian untuk trendline (02:05, setelah backup).
+  cron.schedule('5 2 * * *', () => {
+    try {
+      recordWealthSnapshot(db);
+    } catch (e) {
+      logger.error({ err: e }, 'wealth snapshot failed');
+    }
   });
   // Verify MET mapping once a day.
   cron.schedule('17 3 * * *', () => {

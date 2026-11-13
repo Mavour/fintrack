@@ -26,7 +26,7 @@ export function tierSec(raw: string | undefined, def: number, min = 10): number 
 
 export function getConfig() {
   return {
-    port: Number(process.env.PORT ?? 3000),
+    port: Number(process.env.PORT ?? 3100),
     host: process.env.HOST ?? '0.0.0.0',
     databasePath: process.env.DATABASE_PATH ?? './data/app.db',
     sessionSecret: process.env.SESSION_SECRET ?? 'dev-secret-change-me-32chars!!',

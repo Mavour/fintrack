@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { providerFetch, normalizeList, throwForStatus, type WalletProvider, type WalletRef, type NormalizedPosition } from './walletTypes.js';
 import { logger } from '../logger.js';
+import { Decimal } from 'decimal.js';
 import { redactAddress } from '../services/address.js';
 
 /**
@@ -128,6 +129,12 @@ export class DebankProvider implements WalletProvider {
         const amount = Number(p.data.amount ?? 0);
         if (!(amount > 0)) continue;
         const price = typeof p.data.price === 'number' ? p.data.price : null;
+        let value: number | null = null;
+        try {
+          value = price !== null ? new Decimal(String(p.data.amount ?? '0')).times(price).toNumber() : null;
+        } catch {
+          value = price !== null ? amount * price : null;
+        }
         raw.push({
           chain_id: String(p.data.chain ?? 'eth'),
           kind: 'token',
@@ -136,7 +143,7 @@ export class DebankProvider implements WalletProvider {
           name: String(p.data.name ?? ''),
           amount: String(p.data.amount ?? '0'),
           price_usd: price,
-          value_usd: price !== null ? amount * price : null,
+          value_usd: value,
           meta: { token_id: p.data.id ?? null },
         });
       }

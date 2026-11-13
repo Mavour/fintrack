@@ -107,10 +107,13 @@ async function runLpTier(db: Database.Database): Promise<{ changed: boolean; ret
   let failures = 0;
   for (const r of results) {
     if (r.ok && !r.unchanged) changed = true;
-    if (!r.ok) failures++;
+    if (!r.ok || r.partial) failures++;
     if (r.retryAfterMs) retryAfterMs = Math.max(retryAfterMs ?? 0, r.retryAfterMs);
   }
-  if (results.length > 0 && failures === results.length) throw new Error(results[0].error ?? 'LP sync gagal');
+  if (failures > 0) {
+    if (changed) emitSyncDone(['lp']);
+    throw new Error('Sinkron LP belum lengkap — periksa status provider');
+  }
   return { changed, retryAfterMs };
 }
 
@@ -121,10 +124,13 @@ async function runSolanaTier(db: Database.Database): Promise<{ changed: boolean;
   let failures = 0;
   for (const r of results) {
     if (r.ok && !r.unchanged) changed = true;
-    if (!r.ok) failures++;
+    if (!r.ok || r.partial) failures++;
     if (r.retryAfterMs) retryAfterMs = Math.max(retryAfterMs ?? 0, r.retryAfterMs);
   }
-  if (results.length > 0 && failures === results.length) throw new Error(results[0].error ?? 'Solana sync gagal');
+  if (failures > 0) {
+    if (changed) emitSyncDone(['solana']);
+    throw new Error('Sinkron Solana belum lengkap — periksa status provider');
+  }
   return { changed, retryAfterMs };
 }
 
@@ -138,7 +144,7 @@ async function runEvmTier(db: Database.Database, budget: number): Promise<{ chan
   let failures = 0;
   for (const res of results) {
     if (res.ok && !res.unchanged) changed = true;
-    if (!res.ok) failures++;
+    if (!res.ok || res.partial) failures++;
     if (res.retryAfterMs) retryAfterMs = Math.max(retryAfterMs ?? 0, res.retryAfterMs);
   }
   // Auto-throttle dari proyeksi nyata (bukan tebakan).
@@ -160,20 +166,22 @@ async function runEvmTier(db: Database.Database, budget: number): Promise<{ chan
     r.evmNote = 'Unit DeBank habis — sync EVM berhenti otomatis';
     throw new Error(r.evmNote);
   }
-  if (results.length > 0 && failures === results.length) throw new Error(results[0].error ?? 'EVM sync gagal');
+  if (failures > 0) {
+    if (changed) emitSyncDone(['evm']);
+    throw new Error('Sinkron EVM belum lengkap — periksa status provider');
+  }
   return { changed, retryAfterMs };
 }
 
 async function tick(t: TierName, db: Database.Database, budget: number): Promise<void> {
   const r = getRuntime(t);
   if (r.stopped) return;
-  if (r.running) {
-    // Mutex: lewati tick bila run sebelumnya belum selesai (tidak tumpang tindih).
+  if (!acquireTier(t)) {
+    // Mutex: lewati tick bila run sebelumnya / manual belum selesai (tidak tumpang tindih).
     logger.warn({ tier: t }, 'tier masih berjalan, tick dilewati');
     scheduleNext(t, db, budget, effectiveDelayMs(r));
     return;
   }
-  r.running = true;
   try {
     if (t === 'price') {
       const changed = await runPriceTier(db);
@@ -198,9 +206,25 @@ async function tick(t: TierName, db: Database.Database, budget: number): Promise
     markFailure(t, msg);
     logger.warn({ tier: t, err: msg }, 'tier sync gagal, cache lama dipakai');
   } finally {
-    r.running = false;
+    releaseTier(t);
     if (!r.stopped) scheduleNext(t, db, budget, effectiveDelayMs(r));
   }
+}
+
+/** Mutex per-tier bersama untuk tick otomatis DAN pemicu manual. */
+function acquireTier(t: TierName): boolean {
+  const r = getRuntime(t);
+  if (r.running) return false;
+  r.running = true;
+  return true;
+}
+
+function releaseTier(t: TierName): void {
+  getRuntime(t).running = false;
+}
+
+export function isTierRunning(t: TierName): boolean {
+  return getRuntime(t).running;
 }
 
 function scheduleNext(t: TierName, db: Database.Database, budget: number, delayMs: number): void {
@@ -277,38 +301,62 @@ export function resetTierScheduler(): void {
  */
 export async function triggerAllTiersNow(db: Database.Database): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
-  try {
-    const changed = await runPriceTier(db);
-    markSuccess('price', ['price'], changed);
-    out.price = { ok: true, changed };
-  } catch (e) {
-    markFailure('price', (e as Error).message);
-    out.price = { ok: false };
+  if (acquireTier('price')) {
+    try {
+      const changed = await runPriceTier(db);
+      markSuccess('price', ['price'], changed);
+      out.price = { ok: true, changed };
+    } catch (e) {
+      markFailure('price', (e as Error).message);
+      out.price = { ok: false };
+    } finally {
+      releaseTier('price');
+    }
+  } else {
+    out.price = { ok: false, skipped: 'running' };
   }
-  try {
-    const r = await runLpTier(db);
-    markSuccess('lp', ['lp'], r.changed);
-    out.lp = { ok: true, changed: r.changed };
-  } catch (e) {
-    markFailure('lp', (e as Error).message);
-    out.lp = { ok: false };
+  if (acquireTier('lp')) {
+    try {
+      const r = await runLpTier(db);
+      markSuccess('lp', ['lp'], r.changed);
+      out.lp = { ok: true, changed: r.changed };
+    } catch (e) {
+      markFailure('lp', (e as Error).message);
+      out.lp = { ok: false };
+    } finally {
+      releaseTier('lp');
+    }
+  } else {
+    out.lp = { ok: false, skipped: 'running' };
   }
-  try {
-    const r = await runSolanaTier(db);
-    markSuccess('solana', ['solana'], r.changed);
-    out.solana = { ok: true, changed: r.changed };
-  } catch (e) {
-    markFailure('solana', (e as Error).message);
-    out.solana = { ok: false };
+  if (acquireTier('solana')) {
+    try {
+      const r = await runSolanaTier(db);
+      markSuccess('solana', ['solana'], r.changed);
+      out.solana = { ok: true, changed: r.changed };
+    } catch (e) {
+      markFailure('solana', (e as Error).message);
+      out.solana = { ok: false };
+    } finally {
+      releaseTier('solana');
+    }
+  } else {
+    out.solana = { ok: false, skipped: 'running' };
   }
-  try {
-    const budget = Number(process.env.DEBANK_DAILY_UNIT_BUDGET ?? 0);
-    const r = await runEvmTier(db, budget);
-    markSuccess('evm', ['evm'], r.changed);
-    out.evm = { ok: true, changed: r.changed };
-  } catch (e) {
-    markFailure('evm', (e as Error).message);
-    out.evm = { ok: false };
+  if (acquireTier('evm')) {
+    try {
+      const budget = Number(process.env.DEBANK_DAILY_UNIT_BUDGET ?? 0);
+      const r = await runEvmTier(db, budget);
+      markSuccess('evm', ['evm'], r.changed);
+      out.evm = { ok: true, changed: r.changed };
+    } catch (e) {
+      markFailure('evm', (e as Error).message);
+      out.evm = { ok: false };
+    } finally {
+      releaseTier('evm');
+    }
+  } else {
+    out.evm = { ok: false, skipped: 'running' };
   }
   return out;
 }

@@ -32,6 +32,9 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseMs = 
       return await fn();
     } catch (e) {
       last = e;
+      // Jangan retry 4xx (kecuali 429): request salah, retry hanya buang waktu + rate-limit.
+      const status = (e as { httpStatus?: number; statusCode?: number }).httpStatus ?? (e as { statusCode?: number }).statusCode;
+      if (status !== undefined && status >= 400 && status < 500 && status !== 429) throw e;
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
     }
   }

@@ -102,8 +102,8 @@ export function callsPerEndpoint24h(db: Database.Database): Record<string, numbe
   return out;
 }
 
-/** Tangga throttle EVM: 15s → 30s → 1m → 5m → maks 10m. */
-export const EVM_THROTTLE_LADDER = [15, 30, 60, 300, 600];
+/** Tangga throttle EVM: 10s → 15s → 30s → 1m → 5m → maks 10m. */
+export const EVM_THROTTLE_LADDER = [10, 15, 30, 60, 300, 600];
 export function nextThrottleUp(currentSec: number): number {
   for (const s of EVM_THROTTLE_LADDER) {
     if (s > currentSec) return s;

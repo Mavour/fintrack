@@ -172,7 +172,25 @@ CREATE TABLE IF NOT EXISTS cost_basis (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Daily wealth snapshots for the net-worth / investment trendline.
+-- One row per day (snapshot harian; direkam scheduler + saat boot bila belum ada).
+CREATE TABLE IF NOT EXISTS wealth_history (
+  day TEXT PRIMARY KEY,
+  total_wealth_idr INTEGER NOT NULL DEFAULT 0,
+  invest_value_idr INTEGER NOT NULL DEFAULT 0,
+  cash_idr INTEGER NOT NULL DEFAULT 0,
+  recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+
+-- Token icon cache (mint/contract -> logo URL, resolved server-side).
+-- icon = '' berarti belum ketemu (dingin 1 hari sebelum dicoba lagi).
+CREATE TABLE IF NOT EXISTS token_icons (
+  mint TEXT PRIMARY KEY,
+  icon TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -1,8 +1,9 @@
 import { api } from '../lib/api.js';
 import { formatIdr, timeAgo } from '../lib/format.js';
+import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal } from '../components/modal.js';
 import { isPrivat } from '../lib/state.js';
-import { chainBadge, walletChip, shortAddr } from '../lib/chains.js';
+import { chainBadge, walletChip, shortAddrLink, walletUrl } from '../lib/chains.js';
 
 interface WalletRow {
   id: number; label: string; address: string; network_type: string;
@@ -78,7 +79,7 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
       const used = st.debank.used_24h !== null ? `${st.debank.used_24h} unit/24 jam` : 'pemakaian diukur';
       const proj = st.tiers?.evm ? ` • interval EVM ${st.tiers.evm.activeIntervalSec} dtk` : '';
       debankLine = `<div class="muted" style="margin-top:4px">DeBank: ${used}${st.debank.budget > 0 ? ` / anggaran ${st.debank.budget}/hari` : ''} • sisa ${st.debank.units_remaining ?? '—'}${proj}${st.tiers?.evm?.throttled ? ' • <strong>EVM melambat (hemat unit)</strong>' : ''}</div>`;
-      const calls = Object.entries(st.debank.calls_24h ?? {}).map(([k, v]) => `${k}: ${v}`).join(' • ');
+      const calls = Object.entries(st.debank.calls_24h ?? {}).map(([k, v]) => `${escHtml(k)}: ${Number(v)}`).join(' • ');
       if (calls) debankLine += `<div class="muted">Unit per endpoint (24 jam): ${calls}</div>`;
     }
   } catch {
@@ -93,8 +94,8 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
     <div class="acc-list">
     ${accounts.map((a) => `
       <div class="acc-item between">
-        <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px">${a.name[0]}</span>
-        <div><strong>${a.name}</strong><div class="muted">${a.type.replace('_', ' ')}${a.is_active ? '' : ' • nonaktif'}</div>
+        <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px">${escHtml((a.name[0] ?? '?').toUpperCase())}</span>
+        <div><strong>${escHtml(a.name)}</strong><div class="muted">${escHtml(a.type.replace('_', ' '))}${a.is_active ? '' : ' • nonaktif'}</div>
         <div style="font-weight:800">${isPrivat() ? '••••••' : formatIdr(a.balance_idr)}</div></div></div>
         <button class="btn-ghost" data-edit="${a.id}">Ubah</button>
       </div>`).join('') || '<div class="empty">Belum ada akun. Tambahkan BCA / GoPay / Tunai.</div>'}
@@ -104,23 +105,26 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
     ${debankLine}
     <div class="acc-list">
     ${wallets.map((w) => {
-      const rows = syncRows.filter((s) => s.wallet_id === w.id && !s.provider.startsWith('tier-'));
-      const okRows = rows.filter((s) => s.last_success_at);
-      const errRows = rows.filter((s) => !s.last_success_at && s.last_error);
+      const rows = syncRows.filter((s) => s.wallet_id === w.id && !s.provider.startsWith('tier-') && !s.provider.endsWith('-stub'));
+      const okRows = rows.filter((s) => s.last_success_at && !s.last_error);
+      const errRows = rows.filter((s) => s.last_error || !s.last_success_at);
       const okAt = okRows.map((s) => s.last_success_at as string).sort().pop();
       const provLine = (s: SyncRow): string =>
-        `<div class="muted">• ${s.provider}: ${s.last_success_at ? `ok ${timeAgo(s.last_success_at)}` : `gagal — ${(s.last_error ?? '').slice(0, 80)}`}</div>`;
+        `<div class="muted">• ${escHtml(s.provider)}: ${s.last_error ? `tertunda — ${escHtml(s.last_error.slice(0, 100))}${s.last_success_at ? ` (berhasil terakhir ${escHtml(timeAgo(s.last_success_at))})` : ''}` : s.last_success_at ? `berhasil ${escHtml(timeAgo(s.last_success_at))}` : 'belum tersinkron'}</div>`;
       const hidden = hiddenByWallet.get(w.id) ?? [];
       const hiddenRow = hidden.length > 0
         ? `<button class="chip" data-whidden="${w.id}" style="margin-top:8px">${hidden.length} token disembunyikan (&lt; $1 / tanpa harga)</button>
-           <div id="whidden-${w.id}" style="display:none;margin-top:6px" class="muted">${hidden.sort().join(' • ')}</div>`
+           <div id="whidden-${w.id}" style="display:none;margin-top:6px" class="muted">${hidden.sort().map((s) => escHtml(s)).join(' • ')}</div>`
         : '';
       return `<div class="acc-item">
-        <div class="row" style="flex-wrap:wrap">${chainBadge(w.network_type === 'evm' ? 'eth' : 'solana', w.network_type === 'evm' ? 'EVM' : undefined)}${walletChip(w.label || 'Wallet')}</div>
-        <div style="margin-top:8px"><strong>${shortAddr(w.address)}</strong> <button class="btn-ghost copy-btn" data-copy="${w.address}">Salin</button></div>
+        <div class="row" style="flex-wrap:wrap">${chainBadge(w.network_type === 'evm' ? 'eth' : 'solana', w.network_type === 'evm' ? 'EVM' : undefined)}${walletChip(w.label || 'Wallet', walletUrl(w.address))}</div>
+        <div style="margin-top:8px">${shortAddrLink(w.address)} <button class="btn-ghost copy-btn" data-copy="${w.address}">Salin</button></div>
         <div class="muted">Sync terakhir: ${okAt ? timeAgo(okAt) : 'belum pernah'}</div>
-        ${okRows.slice(0, 5).map(provLine).join('')}
-        ${errRows.slice(0, 4).map(provLine).join('')}
+        ${errRows.map(provLine).join('')}
+        ${okRows.map(provLine).join('')}
+        <div class="muted" style="margin-top:6px">${w.network_type === 'solana'
+          ? 'Saldo, staking, LP, dan dana limit order dibaca terpisah. Reward referral pending/claimable memerlukan verifikasi di Meteora dan belum termasuk total.'
+          : 'Saldo EVM termasuk Elysium (Kinetiq). Token tanpa harga belum termasuk total. LP/DeFi EVM memerlukan cakupan provider tersendiri; saldo wallet bukan bukti semua posisi sudah terbaca.'}</div>
         ${hiddenRow}
         <div class="row" style="margin-top:8px">
           <button class="btn-ghost" data-wedit="${w.id}">Ubah</button>
@@ -139,7 +143,7 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
       const id = (b as HTMLElement).dataset.edit!;
       const cur = accounts.find((a) => String(a.id) === id)!;
       const { close, el: body } = openModal(`Ubah ${cur.name}`, `
-        <label for="c-name">Nama</label><input id="c-name" value="${cur.name}" />
+        <label for="c-name">Nama</label><input id="c-name" value="${escAttr(cur.name)}" />
         <label for="c-bal">Saldo (Rp)</label><input id="c-bal" type="number" min="0" value="${cur.balance_idr}" inputmode="numeric" />
         <button class="btn-primary" id="c-save">Simpan</button>`);
       (body.querySelector('#c-save') as HTMLButtonElement).onclick = async (e) => {
@@ -206,8 +210,8 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
       const id = (b as HTMLElement).dataset.wedit!;
       const cur = wallets.find((w) => String(w.id) === id)!;
       const { close, el: body } = openModal(`Ubah ${cur.label || 'Wallet'}`, `
-        <label for="w-label">Label</label><input id="w-label" value="${cur.label}" />
-        <label for="w-addr">Alamat publik</label><input id="w-addr" value="${cur.address}" autocomplete="off" />
+        <label for="w-label">Label</label><input id="w-label" value="${escAttr(cur.label)}" />
+        <label for="w-addr">Alamat publik</label><input id="w-addr" value="${escAttr(cur.address)}" autocomplete="off" />
         <button class="btn-primary" id="w-save">Simpan</button>`);
       (body.querySelector('#w-save') as HTMLButtonElement).onclick = async (e) => {
         const btn = e.target as HTMLButtonElement;
@@ -260,10 +264,30 @@ async function renderAccountsInner(el: HTMLElement): Promise<void> {
         await api.post(`/api/wallets/registry/${(b as HTMLElement).dataset.wsync}/sync`, {});
         renderAccounts(el);
       } catch (err) {
-        alert((err as Error).message);
-        btn.disabled = false;
-        btn.classList.remove('btn-loading');
-        btn.textContent = label;
+        // Kena cooldown 429 → hitung mundur di tombol lalu coba lagi otomatis sekali.
+        const m = /Tunggu (\d+) detik/.exec((err as Error).message);
+        if (m) {
+          let wait = Number(m[1]);
+          const tick = (): void => {
+            if (!document.contains(btn)) return;
+            if (wait <= 0) {
+              btn.disabled = false;
+              btn.classList.remove('btn-loading');
+              btn.textContent = label;
+              btn.click();
+              return;
+            }
+            btn.textContent = `Tunggu ${wait} dtk…`;
+            wait--;
+            setTimeout(tick, 1000);
+          };
+          tick();
+        } else {
+          alert((err as Error).message);
+          btn.disabled = false;
+          btn.classList.remove('btn-loading');
+          btn.textContent = label;
+        }
       }
     }),
   );

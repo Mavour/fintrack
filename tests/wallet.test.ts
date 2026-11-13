@@ -5,7 +5,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { previewHoldings, importHoldings } from '../src/server/services/walletService.js';
 import { JupiterPriceProvider } from '../src/server/providers/jupiterPrice.js';
-import { parseLpPositions, lpSymbol } from '../src/server/providers/jupiterPositions.js';
+import { parseLpPositions, parseStakingPositions, parseLimitOrders, lpSymbol } from '../src/server/providers/jupiterPositions.js';
+import { getWalletDefi } from '../src/server/services/portfolioService.js';
+import { createWallet } from '../src/server/services/walletRegistry.js';
 import { __resetTokenCache } from '../src/server/providers/solana.js';
 
 const SOL = '3keq3cRtYuoPCYBUL4s6N52ePguGivSZpNU4fzSiPXpd';
@@ -238,6 +240,93 @@ describe('wallet sync', () => {
     expect(lpSymbol('meteora', 'POOLADDR')).toBe('LP-METEORA-POOL');
   });
 
+  it('parses MET staking (meteora-met-staking) tanpa mengambil token Wallet/trade', () => {
+    const out = parseStakingPositions({
+      fetcherResults: [
+        {
+          elements: [
+            {
+              id: 'meteora-met-staking-2mGpvc17xJjQPqNGVBuEHvwdEm22DMwohJatgEQes37z',
+              platformId: 'meteora',
+              serviceId: 'meteora-met-staking',
+              type: 'multiple',
+              label: 'Staked',
+              name: 'MET Staking',
+              sourceRefs: [{ name: 'Pool', address: 'metLXa9nEUV7GJYptkhN7WR1CQ3uNuYS7bRh6LuZeF6' }],
+              data: {
+                assets: [
+                  { data: { address: 'METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL', amount: { raw: '836369721', decimals: 6 }, price: 0.5173607821333213 }, value: 432.7048930091877 },
+                ],
+                rewardAssets: [],
+              },
+            },
+            // Token dompet biasa (label Wallet) tidak boleh dobel dengan RPC fallback.
+            {
+              id: 'wallet-tokens-solana-native',
+              platformId: 'wallet-tokens',
+              serviceId: 'wallet-tokens-solana-native',
+              type: 'multiple',
+              label: 'Wallet',
+              name: 'W',
+              data: {
+                assets: [
+                  { data: { address: '11111111111111111111111111111111', amount: { raw: '52898692', decimals: 9 }, price: 114.9 }, value: 6.07 },
+                ],
+              },
+            },
+            // Limit order (trade) juga bukan staking.
+            { id: 'lo', platformId: 'meteora', serviceId: 'meteora-dlmm-limit-orders', type: 'trade', label: 'LimitOrder', name: 'L', data: {} },
+          ],
+        },
+      ],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].mint).toBe('METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL');
+    expect(out[0].qty).toBe('836.369721');
+    expect(out[0].valueUsd).toBeCloseTo(432.7, 1);
+  });
+
+  it('parses limit order Meteora (input dikunci, Wallet/trade lain dilewati)', () => {
+    const out = parseLimitOrders({
+      fetcherResults: [
+        {
+          elements: [
+            {
+              id: 'meteora-dlmm-limit-order-8j78YDGdM4ysAJgu8BYzd3ppJPChNKh9A9jRirinG43R',
+              platformId: 'meteora',
+              serviceId: 'meteora-dlmm-limit-orders',
+              type: 'trade',
+              label: 'LimitOrder',
+              name: 'LO',
+              data: {
+                assets: {
+                  input: {
+                    data: {
+                      address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                      amount: { raw: '49145116', decimals: 6 },
+                      price: 0.9996515351498227,
+                    },
+                    value: 49.12799065451612,
+                  },
+                },
+                inputAddress: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                outputAddress: 'METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL',
+                filledPercentage: 0.0023529352536398756,
+              },
+            },
+            // Tipe trade tanpa label limit → bukan limit order, dilewati.
+            { id: 'x', platformId: 'p', type: 'trade', label: 'Swap', name: 'S', data: {} },
+          ],
+        },
+      ],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].inputMint).toBe('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+    expect(out[0].inputQty).toBe('49.145116');
+    expect(out[0].valueUsd).toBeCloseTo(49.13, 2);
+    expect(out[0].outputMint).toBe('METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL');
+  });
+
   it('lp import sets avg to pool value so P/L tracks since sync', async () => {
     vi.stubGlobal(
       'fetch',
@@ -282,6 +371,32 @@ describe('wallet sync', () => {
     };
     expect(row.qty).toBe('1');
     expect(row.avg_buy_price_idr).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it('limit order tidak digabung by simbol: tiap pair tampil sendiri + breakdown per wallet', () => {
+    const db = memDb();
+    const w = createWallet(db, 'S', SOL);
+    const w2 = createWallet(db, 'S2', '7yrkckFdoFbYo7iJz4wT6u6YxL2nYwuidH5cYA1SUovW');
+    const ins = db.prepare(
+      `INSERT INTO wallet_positions (wallet_id, chain_id, kind, protocol, symbol, name, amount, price_usd, value_usd, meta)
+       VALUES (?, 'solana', 'defi', 'jupiter-meteora', 'USDC', 'Limit', ?, 1, ?, ?)`,
+    );
+    // USDC→MET dan USDC→HYPE: input sama, output beda → 2 baris.
+    ins.run(w.id, '100', 100, JSON.stringify({ mint: 'EPJ', output_symbol: 'MET', filled_pct: 0 }));
+    ins.run(w.id, '50', 50, JSON.stringify({ mint: 'EPJ', output_symbol: 'HYPE', filled_pct: 0.5 }));
+    // Pair sama beda wallet → 1 baris + breakdown 2 wallet.
+    ins.run(w2.id, '25', 25, JSON.stringify({ mint: 'EPJ', output_symbol: 'MET', filled_pct: 1 }));
+    const { tokens, hiddenCount } = getWalletDefi(db);
+    expect(hiddenCount).toBe(0);
+    expect(tokens).toHaveLength(2);
+    expect(tokens.map((t) => t.output_symbol).sort()).toEqual(['HYPE', 'MET']);
+    const met = tokens.find((t) => t.output_symbol === 'MET')!;
+    expect(met.value_usd).toBeCloseTo(125);
+    expect(met.breakdown).toHaveLength(2);
+    expect(met.breakdown.map((b) => b.wallet).sort()).toEqual(['S', 'S2']);
+    expect(tokens.find((t) => t.output_symbol === 'HYPE')!.filled_pct).toBeCloseTo(0.5);
+    expect(tokens.reduce((s, t) => s + (t.value_usd ?? 0), 0)).toBeCloseTo(175);
     db.close();
   });
 });

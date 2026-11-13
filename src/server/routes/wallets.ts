@@ -6,8 +6,10 @@ import { EVM_CHAINS } from '../providers/evm.js';
 import { getConfig } from '../config.js';
 import { z } from 'zod';
 import { WalletInputSchema, WalletPatchSchema } from '../services/address.js';
-import { listWallets, createWallet, updateWallet, deleteWallet } from '../services/walletRegistry.js';
-import { syncWallet, checkResyncCooldown, checkGlobalResyncCooldown } from '../services/walletSync.js';
+import { listWallets, createWallet, updateWallet, deleteWallet, getWallet } from '../services/walletRegistry.js';
+import { syncWallet, checkManualSyncCooldown, markManualSync, manualSyncKeyWallet, manualSyncKeyAll } from '../services/walletSync.js';
+import { emitSyncDone } from '../services/sse.js';
+import { logger } from '../logger.js';
 import { listPositions, listLp, lpSummary, getSyncStatus, walletSyncHealth } from '../services/walletRead.js';
 import { DebankProvider } from '../providers/debank.js';
 import { getTierStatus, isIdleMode, triggerAllTiersNow } from '../services/tierScheduler.js';
@@ -69,6 +71,9 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
     try {
       const body = WalletInputSchema.parse(req.body);
       const row = createWallet(db, body.label, body.address, body.network_type);
+      // Wallet baru langsung disinkron di background (tanpa cooldown manual)
+      // agar datanya muncul tanpa menunggu tier / klik tombol.
+      backgroundSyncWallet(db, row.id, row.network_type);
       return reply.code(201).send(row);
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
@@ -80,7 +85,16 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
     try {
       const params = z.object({ id: z.coerce.number().int() }).parse((req as { params: unknown }).params);
       const body = WalletPatchSchema.parse(req.body);
-      return updateWallet(db, params.id, body);
+      const before = getWallet(db, params.id);
+      const row = updateWallet(db, params.id, body);
+      // Alamat diganti → snapshot lama hangus: hapus posisi basi lalu sinkron
+      // ulang di background. UI ter-refresh otomatis via SSE sync:done.
+      if (before && before.address !== row.address) {
+        db.prepare('DELETE FROM wallet_positions WHERE wallet_id = ?').run(params.id);
+        db.prepare('DELETE FROM lp_positions WHERE wallet_id = ?').run(params.id);
+        backgroundSyncWallet(db, params.id, row.network_type);
+      }
+      return row;
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       return reply.code(err.statusCode ?? 400).send({ error: err.message ?? 'Gagal mengubah wallet' });
@@ -101,8 +115,11 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
   app.post('/api/wallets/registry/:id/sync', async (req, reply) => {
     try {
       const params = z.object({ id: z.coerce.number().int() }).parse((req as { params: unknown }).params);
-      checkResyncCooldown(db, params.id, getConfig().walletSyncCooldownMs);
-      return await syncWallet(db, params.id);
+      // Cooldown khusus klik manual (sync otomatis tier tidak ikut dihitung).
+      checkManualSyncCooldown(db, manualSyncKeyWallet(params.id), getConfig().walletSyncCooldownMs);
+      const out = await syncWallet(db, params.id);
+      markManualSync(db, manualSyncKeyWallet(params.id));
+      return out;
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       return reply.code(err.statusCode ?? 502).send({ error: err.message ?? 'Sinkron gagal' });
@@ -167,12 +184,27 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
   // --- Manual "Sinkron Ulang": picu semua tingkat sekaligus, cooldown 30 detik ---
   app.post('/api/wallets/sync-all', async (_req, reply) => {
     try {
-      checkGlobalResyncCooldown(db, getConfig().walletSyncCooldownMs);
+      checkManualSyncCooldown(db, manualSyncKeyAll, getConfig().walletSyncCooldownMs);
       const results = await triggerAllTiersNow(db);
+      markManualSync(db, manualSyncKeyAll);
       return { ok: true, results };
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       return reply.code(err.statusCode ?? 502).send({ error: err.message ?? 'Sinkron gagal' });
     }
   });
+}
+
+/**
+ * Sinkron satu wallet di background (setelah tambah/ubah alamat).
+ * Tidak memakai cooldown manual; UI ter-refresh otomatis via SSE bila berubah.
+ */
+function backgroundSyncWallet(db: Database.Database, walletId: number, networkType: string): void {
+  void syncWallet(db, walletId, 'all')
+    .then((r) => {
+      if (r.ok && !r.unchanged) emitSyncDone([networkType === 'evm' ? 'evm' : 'solana']);
+    })
+    .catch((e: unknown) => {
+      logger.warn({ err: (e as Error).message, walletId }, 'background sync setelah ubah wallet gagal');
+    });
 }

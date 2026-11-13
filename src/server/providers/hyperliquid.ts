@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { providerFetch, normalizeList, throwForStatus, type WalletProvider, type WalletRef, type NormalizedPosition } from './walletTypes.js';
 import { logger } from '../logger.js';
 import { redactAddress } from '../services/address.js';
+import { Decimal } from 'decimal.js';
 
 /**
  * HyperCore (Hyperliquid L1) spot balances for the user's EVM address.
@@ -100,7 +101,12 @@ export class HyperliquidSpotProvider implements WalletProvider {
       .filter((b) => Number(b.total) > 0)
       .map((b) => {
         const price = b.coin.toUpperCase() === 'USDC' ? 1 : (prices.get(b.coin.toUpperCase()) ?? null);
-        const amount = Number(b.total);
+        let value: number | null = null;
+        try {
+          value = price !== null ? new Decimal(b.total).times(price).toNumber() : null;
+        } catch {
+          value = price !== null ? Number(b.total) * price : null;
+        }
         return {
           chain_id: 'hypercore',
           kind: 'token' as const,
@@ -109,7 +115,7 @@ export class HyperliquidSpotProvider implements WalletProvider {
           name: `Hyperliquid ${b.coin}`,
           amount: b.total,
           price_usd: price,
-          value_usd: price !== null ? amount * price : null,
+          value_usd: value,
           meta: { coin_index: b.token, hold: b.hold },
         };
       });

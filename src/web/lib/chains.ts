@@ -15,6 +15,7 @@ export const CHAIN_COLORS: Record<string, string> = {
   hypercore: '#00C2A8',
   hyperevm: '#7C8CF8',
   hype: '#7C8CF8',
+  elysium: '#55C4AC',
 };
 
 export const CHAIN_LABELS: Record<string, string> = {
@@ -33,6 +34,7 @@ export const CHAIN_LABELS: Record<string, string> = {
   hypercore: 'HyperCore',
   hyperevm: 'HyperEVM',
   hype: 'HyperEVM',
+  elysium: 'Elysium',
 };
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -49,8 +51,10 @@ export function chainLabel(chainId: string, fallback?: string): string {
 }
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+
+export { esc };
 
 /** Pill 22px / 11px / 600, bg 12% opacity, colored text + dot. */
 export function chainBadge(chainId: string, chainName?: string): string {
@@ -60,9 +64,23 @@ export function chainBadge(chainId: string, chainName?: string): string {
   return `<span class="chain-badge" style="background:rgba(${r},${g},${b},0.12);color:${color}"><span class="dot" style="background:${color}"></span>${label}</span>`;
 }
 
-/** Gray chip for wallet label. */
-export function walletChip(label: string): string {
-  return `<span class="wallet-chip">${esc(label)}</span>`;
+/** Gray chip for wallet label. Bila href diisi → chip jadi link tab baru. */
+export function walletChip(label: string, href?: string | null): string {
+  const inner = esc(label);
+  if (href) return `<a class="wallet-chip" href="${esc(href)}" target="_blank" rel="noopener" title="Lihat detail onchain">${inner}</a>`;
+  return `<span class="wallet-chip">${inner}</span>`;
+}
+
+/** URL detail onchain per alamat: Solana → Jupiter Portfolio, EVM → DeBank. */
+export function walletUrl(address: string): string {
+  const a = address.trim();
+  if (/^0x[0-9a-fA-F]{40}$/.test(a)) return `https://debank.com/profile/${a}`;
+  return `https://jup.ag/portfolio/${a}`;
+}
+
+/** Alamat pendek sebagai link detail onchain (tab baru). */
+export function shortAddrLink(addr: string): string {
+  return `<a href="${esc(walletUrl(addr))}" target="_blank" rel="noopener" title="Lihat detail onchain"><strong>${shortAddr(addr)}</strong></a>`;
 }
 
 /** Short address with copy button (address stays visible in privat mode, shortened). */

@@ -47,7 +47,7 @@ export async function importLp(
     if (wanted && !wanted.includes(p.symbol)) continue;
     // LP tracked as ONE asset: qty 1 @ pool value. Avg = value at import,
     // so P/L means "since tracked" (entry price is unknowable onchain).
-    const priceIdr = Math.max(1, Math.round(p.totalUsd * rate));
+    const priceIdr = Math.round(p.totalUsd * rate);
     const live = (db.prepare('SELECT avg_buy_price_idr FROM assets WHERE symbol = ?').get(p.symbol) ?? {}) as {
       avg_buy_price_idr?: number;
     };
@@ -63,7 +63,7 @@ export async function importLp(
        VALUES (?, 'jupiter-lp', ?, datetime('now'))
        ON CONFLICT(symbol) DO UPDATE SET provider_id = excluded.provider_id, updated_at = datetime('now')`,
     ).run(p.symbol, p.pool);
-    storePrices(db, [{ symbol: p.symbol, priceIdr: Math.max(1, Math.round(p.totalUsd * rate)), source: 'jupiter-lp' }]);
+    storePrices(db, [{ symbol: p.symbol, priceIdr: Math.round(p.totalUsd * rate), source: 'jupiter-lp' }]);
     out.push({ symbol: p.symbol, value_usd: p.totalUsd });
   }
   // Drop tracked LP whose pool vanished AND whose price is stale (>30 min):
@@ -115,7 +115,7 @@ export async function refreshLpPositions(db: Database.Database): Promise<void> {
         .filter((r) => byPool.has(r.provider_id))
         .map((r) => ({
           symbol: r.symbol,
-          priceIdr: Math.max(1, Math.round(byPool.get(r.provider_id)!.totalUsd * rate)),
+          priceIdr: Math.round(byPool.get(r.provider_id)!.totalUsd * rate),
           source: 'jupiter-lp',
         }));
       storePrices(db, prices);

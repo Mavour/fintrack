@@ -1,0 +1,11 @@
+.env
+.env.*
+data/
+backups/
+*.db
+*.db-journal
+node_modules/
+dist/
+.git/
+screenshots/
+*.log

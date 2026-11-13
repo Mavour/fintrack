@@ -6,7 +6,7 @@ if (process.env.DEMO_MODE !== 'true') {
   console.error('REFUSED: set DEMO_MODE=true to seed demo data (default false, protects real DBs).');
   process.exit(2);
 }
-const BASE = process.env.SEED_BASE ?? 'http://127.0.0.1:3000';
+const BASE = process.env.SEED_BASE ?? 'http://127.0.0.1:3100';
 
 let pass = 0;
 let fail = 0;

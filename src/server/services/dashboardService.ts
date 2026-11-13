@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getUnifiedPortfolio } from './portfolioService.js';
+import { getCachedUsdIdr } from '../providers/fxRate.js';
 
 export interface DashboardSummary {
   total_cash_idr: number;
@@ -39,6 +40,23 @@ export function getDashboard(db: Database.Database, month?: string): DashboardSu
   for (const w of uni.wallet_tokens) {
     if ((w.value_idr ?? 0) > 0) byAsset.push({ symbol: w.symbol, value_idr: w.value_idr ?? 0 });
   }
+  for (const d of uni.wallet_defi) {
+    if ((d.value_idr ?? 0) > 0) byAsset.push({ symbol: `LO ${d.symbol}→${d.output_symbol ?? '?'}`, value_idr: d.value_idr ?? 0 });
+  }
+  try {
+    const rate = getCachedUsdIdr(db);
+    if (rate) {
+      const lps = db.prepare(
+        `SELECT pair, protocol, COALESCE(position_value_usd,0) + COALESCE(unclaimed_fees_usd,0) AS v
+         FROM lp_positions ORDER BY v DESC`,
+      ).all() as Array<{ pair: string; protocol: string; v: number }>;
+      for (const l of lps) {
+        if (l.v > 0) byAsset.push({ symbol: `LP ${l.pair || l.protocol}`, value_idr: Math.round(l.v * rate) });
+      }
+    }
+  } catch {
+    // Tabel LP belum ada (DB lama).
+  }
 
   const allocation = [
     { label: 'Kas', value_idr: cashRow.t },
@@ -66,4 +84,45 @@ export function getDashboard(db: Database.Database, month?: string): DashboardSu
     expense_by_category: expenseRows,
     portfolio_by_asset: byAsset,
   };
+}
+
+/** Rekam snapshot kekayaan hari ini (idempoten per hari). Dipanggil scheduler + boot. */
+export function recordWealthSnapshot(db: Database.Database): void {
+  try {
+    db.prepare(`CREATE TABLE IF NOT EXISTS wealth_history (
+      day TEXT PRIMARY KEY, total_wealth_idr INTEGER NOT NULL DEFAULT 0,
+      invest_value_idr INTEGER NOT NULL DEFAULT 0, cash_idr INTEGER NOT NULL DEFAULT 0,
+      recorded_at TEXT NOT NULL DEFAULT (datetime('now')))`)
+      .run();
+    const d = getDashboard(db);
+    db.prepare(
+      `INSERT INTO wealth_history (day, total_wealth_idr, invest_value_idr, cash_idr)
+       VALUES (date('now','localtime'), ?, ?, ?)
+       ON CONFLICT(day) DO UPDATE SET total_wealth_idr = excluded.total_wealth_idr,
+         invest_value_idr = excluded.invest_value_idr, cash_idr = excluded.cash_idr,
+         recorded_at = datetime('now')`,
+    ).run(d.total_wealth_idr, d.total_invested_value_idr, d.total_cash_idr);
+  } catch {
+    // Snapshot tidak boleh menggagalkan boot/scheduler.
+  }
+}
+
+export interface WealthPoint {
+  day: string;
+  total_wealth_idr: number;
+  invest_value_idr: number;
+  cash_idr: number;
+}
+
+/** Deret harian untuk trendline (terlama → terbaru, maks `days`). */
+export function getWealthTrend(db: Database.Database, days = 90): WealthPoint[] {
+  try {
+    const rows = db.prepare(
+      `SELECT day, total_wealth_idr, invest_value_idr, cash_idr FROM wealth_history
+       ORDER BY day DESC LIMIT ?`,
+    ).all(Math.max(1, Math.min(365, days))) as WealthPoint[];
+    return rows.reverse();
+  } catch {
+    return [];
+  }
 }
