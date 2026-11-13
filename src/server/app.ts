@@ -33,19 +33,28 @@ export async function buildApp() {
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, trustProxy: true });
   await app.register(cookie, { secret: config.sessionSecret });
-  await app.register(helmet, {
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'https:'],
-        connectSrc: ["'self'"],
-        fontSrc: ["'self'", 'data:'],
-        objectSrc: ["'none'"],
-        baseUri: ["'self'"],
+  await app.register(helmet, { global: false });
+  app.addHook('onRequest', async (req, reply) => {
+    // Direct IP access may use HTTP; HTTPS can terminate at the reverse proxy.
+    const secure = req.protocol === 'https';
+    await reply.helmet({
+      crossOriginOpenerPolicy: secure ? { policy: 'same-origin' } : false,
+      originAgentCluster: secure,
+      strictTransportSecurity: secure ? { maxAge: 31536000, includeSubDomains: true } : false,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'https:'],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'", 'data:'],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          upgradeInsecureRequests: secure ? [] : null,
+        },
       },
-    },
+    });
   });
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
 
