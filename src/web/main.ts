@@ -181,8 +181,7 @@ async function logout(): Promise<void> {
   else location.hash = '#/masuk';
 }
 
-/** Page header: judul+tanggal pindah ke topbar (tanpa logo berulang).
- *  Di sini tinggal aksi: quick-row (desktop) + privat/catat. */
+/** Page header: tanggal mobile + privat/catat. */
 function renderPagehead(): void {
   const h = location.hash.split('?')[0] || '#/';
   if (h === '#/masuk') {
@@ -192,7 +191,7 @@ function renderPagehead(): void {
   const desktop = isDesktop();
   pagehead.innerHTML = `
     <div class="between" style="width:100%">
-      <div>${desktop ? `<div class="quick-row" id="quick-row"></div>` : `<div class="date">${todayLong()}</div>`}</div>
+      <div>${desktop ? '' : `<div class="date">${todayLong()}</div>`}</div>
       <div class="header-actions">
         <button class="btn-ghost" id="btn-privat" aria-pressed="${isPrivat()}">${isPrivat() ? 'Tampilkan' : 'Privat'}</button>
         ${desktop ? `<button class="btn-primary" id="btn-record">+ Catat Transaksi</button>` : ''}
@@ -204,18 +203,6 @@ function renderPagehead(): void {
     route();
   };
   document.getElementById('btn-record')!.onclick = () => openQuickTx('expense');
-  if (desktop) {
-    const qr = document.getElementById('quick-row')!;
-    const items: Array<[string, string]> = [
-      ['expense', 'Pengeluaran'],
-      ['income', 'Top Up'],
-      ['transfer', 'Transfer'],
-    ];
-    qr.innerHTML = items.map(([k, l]) => `<button data-q="${k}">${l}</button>`).join('');
-    qr.querySelectorAll('[data-q]').forEach(
-      (b) => ((b as HTMLElement).onclick = () => openQuickTx((b as HTMLElement).dataset.q!)),
-    );
-  }
 }
 
 async function openQuickTx(kind: string): Promise<void> {

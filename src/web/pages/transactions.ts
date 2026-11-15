@@ -165,10 +165,20 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
   );
   el.querySelectorAll('[data-del]').forEach(
     (b) => ((b as HTMLElement).onclick = async () => {
-      if (!confirm('Hapus transaksi ini? Saldo akan dikembalikan.')) return;
-      await api.del(`/api/transactions/${(b as HTMLElement).dataset.del}`);
-      resetCache();
-      renderTransactions(el);
+      const btn = b as HTMLButtonElement;
+      if (btn.disabled || !confirm('Hapus transaksi ini? Saldo akan disesuaikan kembali.')) return;
+      btn.disabled = true;
+      btn.classList.add('btn-loading');
+      try {
+        await api.del(`/api/transactions/${btn.dataset.del}`);
+        resetCache();
+        await renderTransactions(el);
+      } catch (err) {
+        alert((err as Error).message);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('btn-loading');
+      }
     }),
   );
   const moreBtn = document.getElementById('btn-more') as HTMLButtonElement | null;

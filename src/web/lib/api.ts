@@ -50,7 +50,7 @@ async function req(path: string, init?: RequestInit): Promise<unknown> {
   }
   let res: Response;
   try {
-    res = await fetch(path, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
+    res = await fetch(path, { credentials: 'same-origin', ...init, headers: { ...(init?.body != null ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}) } });
   } catch (e) {
     if (!read) throw e;
     pauseReads(30_000);

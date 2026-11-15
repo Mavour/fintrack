@@ -134,14 +134,6 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
       </div>
     </div>`;
 
-  const qaTiles = isDesktop()
-    ? ''
-    : `<div class="card quick-actions-card"><div class="qa-grid">
-      <button class="qa-tile" data-q="expense"><span class="qa-ic">${icons.minus}</span>Pengeluaran</button>
-      <button class="qa-tile" data-q="income"><span class="qa-ic">${icons.plus}</span>Top Up</button>
-      <button class="qa-tile" data-q="transfer"><span class="qa-ic">${icons.swap}</span>Transfer</button>
-    </div></div>`;
-
   const sumberDana = `
     <div class="card">
       <div class="between"><div><span class="eyebrow">Dana tersedia</span><h2 class="section-heading">Akun &amp; saldo</h2></div><a class="text-link" href="#/akun">Kelola ↗</a></div>
@@ -176,7 +168,7 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
       ${dash.expense_by_category.length ? `<div class="span12"><div class="card"><h2 class="section-heading">Pengeluaran per kategori</h2><div style="margin-top:14px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div></div>` : ''}
     </div>`;
   } else {
-    html = `${intro}${balanceCard}${qaTiles}${sumberDana}
+    html = `${intro}${balanceCard}${sumberDana}
       <div class="card"><div class="between"><h2 class="section-heading">Aset terbesar</h2><a class="text-link" href="#/portofolio">Lihat semua ↗</a></div><div class="grid2">${watchHtml}</div></div>
       ${trendCard}
       ${dash.expense_by_category.length ? `<div class="card"><strong>Pengeluaran bulan ini</strong><div style="margin-top:8px">${donut(dash.expense_by_category.map((c, i) => ({ label: c.category, value: c.total_idr, color: PALETTE[i % PALETTE.length] })))}</div></div>` : ''}
@@ -185,9 +177,6 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
 
   el.innerHTML = html;
 
-  el.querySelectorAll('[data-q]').forEach(
-    (b) => ((b as HTMLElement).onclick = () => (location.hash = `#/transaksi?baru=${(b as HTMLElement).dataset.q}`)),
-  );
   el.querySelectorAll('[data-add-acc]').forEach(
     (b) => ((b as HTMLElement).onclick = () => openAddAccountModal(() => renderHome(el))),
   );
