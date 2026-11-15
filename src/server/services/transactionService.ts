@@ -31,7 +31,7 @@ export function createTransactionCategory(db: Database.Database, input: z.infer<
 }
 
 export const CreateTxSchema = z.object({
-  kind: TxKindSchema,
+  kind: z.enum(['expense', 'income', 'transfer', 'withdrawal']),
   amount_idr: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   account_id: z.number().int().positive(),
   to_account_id: z.number().int().positive().nullable().optional(),
@@ -126,7 +126,12 @@ function validateShape(input: CreateTxInput): void {
 }
 
 export function createTransaction(db: Database.Database, input: CreateTxInput): Tx {
-  const parsed = CreateTxSchema.parse(input);
+  const request = CreateTxSchema.parse(input);
+  const parsed = {
+    ...request,
+    kind: request.kind === 'withdrawal' ? 'transfer' as const : request.kind,
+    category: request.kind === 'withdrawal' ? 'Tarik Tunai' : request.category,
+  };
   validateShape(parsed);
   const occurred = parsed.occurred_at ?? new Date().toISOString();
   const insert = () =>
@@ -145,6 +150,13 @@ export function createTransaction(db: Database.Database, input: CreateTxInput): 
         occurred,
       );
   const atomic = db.transaction(() => {
+    if (request.kind === 'withdrawal') {
+      const from = db.prepare('SELECT type, is_active FROM accounts WHERE id = ?').get(parsed.account_id) as { type: string; is_active: number } | undefined;
+      const to = db.prepare('SELECT type, is_active FROM accounts WHERE id = ?').get(parsed.to_account_id) as { type: string; is_active: number } | undefined;
+      if (from?.type !== 'bank' || !from.is_active || to?.type !== 'cash' || !to.is_active) {
+        throw Object.assign(new Error('Tarik tunai harus dari akun bank aktif ke akun tunai aktif'), { statusCode: 400 });
+      }
+    }
     applyEffect(
       db,
       {

@@ -1,7 +1,7 @@
 import { api } from '../lib/api.js';
 import { formatIdr, fmtDate } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
-import { openModal, txForm, wireCatOptions, readOccurredAt, type TxFormInit } from '../components/modal.js';
+import { openModal, txForm, wireCatOptions, wireTxAccounts, readOccurredAt, type TxFormInit, type TxAccountRef } from '../components/modal.js';
 import { isDesktop } from '../lib/state.js';
 
 interface Tx {
@@ -9,9 +9,7 @@ interface Tx {
   to_account_id: number | null; category: string; note: string; occurred_at: string;
 }
 
-interface AccountRef {
-  id: number; name: string;
-}
+type AccountRef = TxAccountRef;
 
 let sortKey: 'date' | 'amount' = 'date';
 let sortDir: 1 | -1 = -1;
@@ -240,14 +238,8 @@ function openNew(el: HTMLElement, kind: string, accounts: AccountRef[]): void {
     return;
   }
   const { close, el: body } = openModal('Catat Transaksi', txForm(accounts, kind));
-  const kindSel = body.querySelector('#f-kind') as HTMLSelectElement;
-  const toWrap = body.querySelector('#f-to-wrap') as HTMLElement;
-  const sync = () => {
-    toWrap.style.display = kindSel.value === 'transfer' ? 'block' : 'none';
-  };
-  kindSel.onchange = sync;
-  sync();
   wireCatOptions(body);
+  wireTxAccounts(body, accounts);
   (body.querySelector('#f-save') as HTMLButtonElement).onclick = async () => {
     const v = (id: string) => (body.querySelector(id) as HTMLInputElement | HTMLSelectElement).value;
     try {
@@ -255,7 +247,7 @@ function openNew(el: HTMLElement, kind: string, accounts: AccountRef[]): void {
         kind: v('#f-kind'),
         amount_idr: Number((body.querySelector('#f-amount') as HTMLInputElement).value),
         account_id: Number(v('#f-acc')),
-        ...(v('#f-kind') === 'transfer' ? { to_account_id: Number(v('#f-to')) } : {}),
+        ...(['transfer', 'withdrawal'].includes(v('#f-kind')) ? { to_account_id: Number(v('#f-to')) } : {}),
         category: v('#f-cat') || 'Lainnya',
         note: v('#f-note'),
         occurred_at: readOccurredAt(body),
@@ -280,7 +272,8 @@ function openEdit(el: HTMLElement, tx: Tx, accounts: AccountRef[]): void {
     lockKind: true,
     lockAccounts: true,
   };
-  const { close, el: body } = openModal(`Ubah Transaksi`, txForm(accounts, tx.kind, init));
+  const kind = tx.kind === 'transfer' && tx.category === 'Tarik Tunai' ? 'withdrawal' : tx.kind;
+  const { close, el: body } = openModal(`Ubah Transaksi`, txForm(accounts, kind, init));
   wireCatOptions(body);
   (body.querySelector('#f-save') as HTMLButtonElement).onclick = async (e) => {
     const btn = e.target as HTMLButtonElement;

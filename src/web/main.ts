@@ -5,7 +5,7 @@ import { priceStatus, type CachedPrice } from './lib/prices.js';
 import { connectSse } from './lib/sse.js';
 import { isDesktop, isPrivat, togglePrivat, getTheme, toggleTheme, applyTheme, getAuthed, setAuthed } from './lib/state.js';
 import { icons } from './components/icons.js';
-import { openModal, txForm, wireCatOptions, readOccurredAt } from './components/modal.js';
+import { openModal, txForm, wireCatOptions, wireTxAccounts, readOccurredAt, type TxAccountRef } from './components/modal.js';
 import { invalidateTxCache } from './pages/transactions.js';
 import { renderHome, applyLiveHome } from './pages/home.js';
 import { renderPortfolio, applyLivePortfolio, type PortfolioFrame } from './pages/portfolio.js';
@@ -207,20 +207,14 @@ function renderPagehead(): void {
 
 async function openQuickTx(kind: string): Promise<void> {
   try {
-    const accounts = (await api.get('/api/accounts')) as Array<{ id: number; name: string }>;
+    const accounts = (await api.get('/api/accounts')) as TxAccountRef[];
     if (accounts.length === 0) {
       location.hash = '#/akun';
       return;
     }
     const { close, el: body } = openModal('Catat Transaksi', txForm(accounts, kind));
-    const kindSel = body.querySelector('#f-kind') as HTMLSelectElement;
-    const toWrap = body.querySelector('#f-to-wrap') as HTMLElement;
-    const sync = () => {
-      toWrap.style.display = kindSel.value === 'transfer' ? 'block' : 'none';
-    };
-    kindSel.onchange = sync;
-    sync();
     wireCatOptions(body);
+    wireTxAccounts(body, accounts);
     (body.querySelector('#f-save') as HTMLButtonElement).onclick = async () => {
       const v = (id: string) => (body.querySelector(id) as HTMLInputElement | HTMLSelectElement).value;
       try {
@@ -228,7 +222,7 @@ async function openQuickTx(kind: string): Promise<void> {
           kind: v('#f-kind'),
           amount_idr: Number((body.querySelector('#f-amount') as HTMLInputElement).value),
           account_id: Number(v('#f-acc')),
-          ...(v('#f-kind') === 'transfer' ? { to_account_id: Number(v('#f-to')) } : {}),
+          ...(['transfer', 'withdrawal'].includes(v('#f-kind')) ? { to_account_id: Number(v('#f-to')) } : {}),
           category: v('#f-cat') || 'Lainnya',
           note: v('#f-note'),
           occurred_at: readOccurredAt(body),

@@ -38,7 +38,51 @@ export const TX_CATEGORIES: Record<string, string[]> = {
   expense: ['Makan', 'Transport', 'Belanja', 'Hiburan', 'Kesehatan', 'Pendidikan', 'Tagihan', 'Rumah Tangga', 'Lainnya'],
   income: ['Gaji', 'Bonus', 'Hadiah', 'Bunga & Dividen', 'Lainnya'],
   transfer: ['Pindah Dana'],
+  withdrawal: ['Tarik Tunai'],
 };
+
+export interface TxAccountRef {
+  id: number;
+  name: string;
+  type: string;
+  is_active: number;
+}
+
+/** Withdrawal selects a bank and defaults to the first active cash account. */
+export function wireTxAccounts(body: HTMLElement, accounts: TxAccountRef[]): void {
+  const kind = body.querySelector('#f-kind') as HTMLSelectElement;
+  const from = body.querySelector('#f-acc') as HTMLSelectElement;
+  const to = body.querySelector('#f-to') as HTMLSelectElement | null;
+  if (from.tagName !== 'SELECT' || !to) return;
+  const toWrap = body.querySelector('#f-to-wrap') as HTMLElement;
+  const hint = body.querySelector('#f-withdrawal-hint') as HTMLElement;
+  const save = body.querySelector('#f-save') as HTMLButtonElement;
+  const fill = (select: HTMLSelectElement, rows: TxAccountRef[], empty: string) => {
+    const previous = select.value;
+    select.innerHTML = rows.length
+      ? rows.map((a) => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('')
+      : `<option value="">${empty}</option>`;
+    if (rows.some((a) => String(a.id) === previous)) select.value = previous;
+  };
+  const sync = () => {
+    const withdrawal = kind.value === 'withdrawal';
+    const banks = withdrawal ? accounts.filter((a) => a.type === 'bank' && a.is_active) : accounts;
+    const cash = withdrawal ? accounts.filter((a) => a.type === 'cash' && a.is_active) : accounts;
+    fill(from, banks, 'Belum ada akun bank aktif');
+    fill(to, cash, 'Belum ada akun tunai aktif');
+    toWrap.style.display = kind.value === 'transfer' || withdrawal ? 'block' : 'none';
+    body.querySelector('label[for="f-acc"]')!.textContent = withdrawal ? 'Dari bank' : 'Dari akun';
+    body.querySelector('label[for="f-to"]')!.textContent = withdrawal ? 'Masuk ke akun tunai' : 'Ke akun';
+    hint.hidden = !withdrawal;
+    const missing = withdrawal && (!banks.length || !cash.length);
+    hint.innerHTML = missing
+      ? 'Tambahkan akun bank dan akun bertipe tunai yang aktif di menu Akun &amp; Bank terlebih dahulu.'
+      : 'Saldo bank berkurang dan saldo tunai bertambah sesuai nominal. Total uang tetap sama.';
+    save.disabled = missing;
+  };
+  kind.addEventListener('change', sync);
+  sync();
+}
 
 /** Keep presets and saved categories together without duplicate names. */
 export function catOptions(kind: string, saved: string[] = [], selected = ''): string {
@@ -75,7 +119,8 @@ export function wireCatOptions(body: HTMLElement): void {
   };
   kindSel.addEventListener('change', () => {
     showEditor(false);
-    controls.hidden = kindSel.value === 'transfer';
+    controls.hidden = kindSel.value === 'transfer' || kindSel.value === 'withdrawal';
+    catSel.disabled = kindSel.value === 'withdrawal';
     refill('');
   });
   addBtn.onclick = () => showEditor(true);
@@ -118,6 +163,7 @@ const KIND_LABEL: Record<string, string> = {
   expense: 'Pengeluaran',
   income: 'Pemasukan (Top Up)',
   transfer: 'Transfer',
+  withdrawal: 'Tarik Tunai',
 };
 
 /** ISO → nilai <input type="datetime-local"> (waktu lokal pembaca). */
@@ -148,7 +194,7 @@ export interface TxFormInit {
   lockAccounts?: boolean;
 }
 
-export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'expense', init?: TxFormInit): string {
+export function txForm(accounts: TxAccountRef[], kind = 'expense', init?: TxFormInit): string {
   const accOpts = accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(init?.account_id ?? '') ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('');
   const accName = (id: number | null | undefined): string => (id == null ? '' : accounts.find((a) => a.id === id)?.name ?? '');
 
@@ -166,6 +212,7 @@ export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'ex
         <option value="expense" ${kind === 'expense' ? 'selected' : ''}>Pengeluaran</option>
         <option value="income" ${kind === 'income' ? 'selected' : ''}>Pemasukan (Top Up)</option>
         <option value="transfer" ${kind === 'transfer' ? 'selected' : ''}>Transfer</option>
+        <option value="withdrawal" ${kind === 'withdrawal' ? 'selected' : ''}>Tarik Tunai</option>
       </select>`,
     );
   }
@@ -178,7 +225,7 @@ export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'ex
     fields.push(
       `<label for="f-acc">Dari akun</label><div class="muted" style="margin-top:-6px">${escHtml(accName(init.account_id)) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-acc" value="${escAttr(init.account_id ?? '')}" />`,
     );
-    if (kind === 'transfer') {
+    if (kind === 'transfer' || kind === 'withdrawal') {
       fields.push(
         `<div class="muted" style="margin-top:2px">Ke akun: ${escHtml(accName(init.to_account_id)) || '—'} — tidak bisa diubah</div><input type="hidden" id="f-to" value="${escAttr(init.to_account_id ?? '')}" />`,
       );
@@ -192,8 +239,9 @@ export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'ex
   }
 
   fields.push(
-    `<label for="f-cat">Kategori</label><select id="f-cat">${cats}</select>`,
-    `<div id="f-cat-controls"${kind === 'transfer' ? ' hidden' : ''}>
+    `<div id="f-withdrawal-hint" class="muted" hidden style="margin-top:8px"></div>`,
+    `<label for="f-cat">Kategori</label><select id="f-cat"${kind === 'withdrawal' ? ' disabled' : ''}>${cats}</select>`,
+    `<div id="f-cat-controls"${kind === 'transfer' || kind === 'withdrawal' ? ' hidden' : ''}>
       <button type="button" class="btn-ghost" id="f-cat-add" style="margin-top:8px">+ Kategori baru</button>
       <div id="f-cat-editor" hidden>
         <label for="f-cat-name">Nama kategori baru</label>

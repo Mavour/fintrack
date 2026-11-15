@@ -193,7 +193,7 @@ function recentTx(
   return `<table class="data" style="min-width:0"><tbody>${txs
     .map(
       (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''} • ${escHtml(t.occurred_at.slice(0, 10))}</div></td>
-    <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : 'pos'}"><strong>${t.kind === 'expense' ? '−' : '+'}${formatIdr(t.amount_idr)}</strong></td></tr>`,
+    <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : ''}"><strong>${t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : ''}${formatIdr(t.amount_idr)}</strong></td></tr>`,
     )
     .join('')}</tbody></table>`;
 }
