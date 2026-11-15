@@ -9,6 +9,9 @@ import {
   CreateTxSchema,
   UpdateTxSchema,
   TxKindSchema,
+  CreateCategorySchema,
+  listTransactionCategories,
+  createTransactionCategory,
 } from '../services/transactionService.js';
 
 const ListQuery = z.object({
@@ -21,6 +24,16 @@ const ListQuery = z.object({
 const IdParam = z.object({ id: z.coerce.number().int().positive() });
 
 export function registerTransactionRoutes(app: FastifyInstance, db: Database.Database): void {
+  app.get('/api/transactions/categories', async () => listTransactionCategories(db));
+
+  app.post('/api/transactions/categories', async (req, reply) => {
+    try {
+      return reply.code(201).send(createTransactionCategory(db, CreateCategorySchema.parse(req.body)));
+    } catch (e: unknown) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+  });
+
   app.get('/api/transactions', async (req) => {
     const q = ListQuery.parse((req as { query: unknown }).query);
     return listTransactions(db, q);

@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_tx_occurred ON transactions(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_tx_kind ON transactions(kind);
 
+CREATE TABLE IF NOT EXISTS transaction_categories (
+  kind TEXT NOT NULL CHECK (kind IN ('expense','income')),
+  name TEXT NOT NULL COLLATE NOCASE CHECK (length(trim(name)) BETWEEN 1 AND 60),
+  PRIMARY KEY (kind, name)
+);
+
 CREATE TABLE IF NOT EXISTS assets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL CHECK (type IN ('crypto','saham','reksadana')),

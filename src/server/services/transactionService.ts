@@ -4,6 +4,32 @@ import { z } from 'zod';
 export const TxKindSchema = z.enum(['expense', 'income', 'transfer']);
 export type TxKind = z.infer<typeof TxKindSchema>;
 
+export const CreateCategorySchema = z.object({
+  kind: z.enum(['expense', 'income']),
+  name: z.string().trim().min(1, 'Nama kategori wajib diisi').max(60, 'Nama kategori maksimal 60 karakter'),
+});
+
+export function listTransactionCategories(db: Database.Database): Record<'expense' | 'income', string[]> {
+  const rows = db.prepare(`
+    SELECT kind, name FROM transaction_categories
+    UNION
+    SELECT kind, trim(category) AS name FROM transactions
+    WHERE kind IN ('expense', 'income') AND length(trim(category)) BETWEEN 1 AND 60
+    ORDER BY name COLLATE NOCASE
+  `).all() as Array<{ kind: 'expense' | 'income'; name: string }>;
+  const result: Record<'expense' | 'income', string[]> = { expense: [], income: [] };
+  for (const row of rows) result[row.kind].push(row.name);
+  return result;
+}
+
+export function createTransactionCategory(db: Database.Database, input: z.infer<typeof CreateCategorySchema>): { kind: 'expense' | 'income'; name: string } {
+  const parsed = CreateCategorySchema.parse(input);
+  db.prepare('INSERT INTO transaction_categories (kind, name) VALUES (?, ?) ON CONFLICT DO NOTHING')
+    .run(parsed.kind, parsed.name);
+  return db.prepare('SELECT kind, name FROM transaction_categories WHERE kind = ? AND name = ?')
+    .get(parsed.kind, parsed.name) as { kind: 'expense' | 'income'; name: string };
+}
+
 export const CreateTxSchema = z.object({
   kind: TxKindSchema,
   amount_idr: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),

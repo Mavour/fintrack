@@ -281,6 +281,7 @@ function openEdit(el: HTMLElement, tx: Tx, accounts: AccountRef[]): void {
     lockAccounts: true,
   };
   const { close, el: body } = openModal(`Ubah Transaksi`, txForm(accounts, tx.kind, init));
+  wireCatOptions(body);
   (body.querySelector('#f-save') as HTMLButtonElement).onclick = async (e) => {
     const btn = e.target as HTMLButtonElement;
     if (btn.disabled) return;

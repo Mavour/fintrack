@@ -1,5 +1,6 @@
 import { icons } from './icons.js';
 import { escAttr, escHtml } from '../lib/escape.js';
+import { api } from '../lib/api.js';
 
 export { escAttr };
 
@@ -39,18 +40,78 @@ export const TX_CATEGORIES: Record<string, string[]> = {
   transfer: ['Pindah Dana'],
 };
 
-/** Preset options so categories stay consistent for grouping (no free typing). */
-export function catOptions(kind: string): string {
-  return (TX_CATEGORIES[kind] ?? TX_CATEGORIES.expense).map((c) => `<option>${c}</option>`).join('');
+/** Keep presets and saved categories together without duplicate names. */
+export function catOptions(kind: string, saved: string[] = [], selected = ''): string {
+  const names = new Map<string, string>();
+  for (const name of [...(TX_CATEGORIES[kind] ?? TX_CATEGORIES.expense), ...saved, ...(selected ? [selected] : [])]) {
+    names.set(name.toLocaleLowerCase(), name);
+  }
+  return [...names.values()].map((name) => `<option${name === selected ? ' selected' : ''}>${escHtml(name)}</option>`).join('');
 }
 
-/** Re-fill the category select when the kind changes. */
+/** Load shared categories and allow adding one without leaving the transaction. */
 export function wireCatOptions(body: HTMLElement): void {
-  const kindSel = body.querySelector('#f-kind') as HTMLSelectElement | null;
+  const kindSel = body.querySelector('#f-kind') as HTMLSelectElement | HTMLInputElement | null;
   const catSel = body.querySelector('#f-cat') as HTMLSelectElement | null;
   if (!kindSel || !catSel) return;
+  const controls = body.querySelector('#f-cat-controls') as HTMLElement;
+  const editor = body.querySelector('#f-cat-editor') as HTMLElement;
+  const nameInput = body.querySelector('#f-cat-name') as HTMLInputElement;
+  const addBtn = body.querySelector('#f-cat-add') as HTMLButtonElement;
+  const saveBtn = body.querySelector('#f-cat-save') as HTMLButtonElement;
+  const cancelBtn = body.querySelector('#f-cat-cancel') as HTMLButtonElement;
+  const txSave = body.querySelector('#f-save') as HTMLButtonElement;
+  const status = body.querySelector('#f-cat-status') as HTMLElement;
+  let saved: Record<string, string[]> = {};
+  const refill = (selected = catSel.value) => {
+    catSel.innerHTML = catOptions(kindSel.value, saved[kindSel.value], selected);
+  };
+  const showEditor = (open: boolean) => {
+    editor.hidden = !open;
+    addBtn.hidden = open;
+    txSave.disabled = open;
+    status.textContent = '';
+    if (open) { nameInput.value = ''; nameInput.focus(); }
+  };
   kindSel.addEventListener('change', () => {
-    catSel.innerHTML = catOptions(kindSel.value);
+    showEditor(false);
+    controls.hidden = kindSel.value === 'transfer';
+    refill('');
+  });
+  addBtn.onclick = () => showEditor(true);
+  cancelBtn.onclick = () => { showEditor(false); addBtn.focus(); };
+  saveBtn.onclick = async () => {
+    if (saveBtn.disabled) return;
+    const name = nameInput.value.trim();
+    if (!name || name.length > 60) {
+      status.textContent = 'Isi nama kategori antara 1–60 karakter.';
+      nameInput.focus();
+      return;
+    }
+    const kind = kindSel.value;
+    saveBtn.disabled = cancelBtn.disabled = kindSel.disabled = true;
+    try {
+      const category = await api.post('/api/transactions/categories', { kind, name }) as { kind: string; name: string };
+      (saved[category.kind] ??= []).push(category.name);
+      refill(category.name);
+      showEditor(false);
+      catSel.focus();
+    } catch (e) {
+      status.textContent = (e as Error).message;
+    } finally {
+      saveBtn.disabled = cancelBtn.disabled = kindSel.disabled = false;
+    }
+  };
+  nameInput.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+  };
+  void api.get('/api/transactions/categories').then((data) => {
+    for (const [kind, names] of Object.entries(data as Record<string, string[]>)) {
+      saved[kind] = [...names, ...(saved[kind] ?? [])];
+    }
+    refill();
+  }).catch(() => {
+    status.textContent = 'Kategori tersimpan belum dapat dimuat. Buka ulang formulir untuk mencoba lagi.';
   });
 }
 const KIND_LABEL: Record<string, string> = {
@@ -91,13 +152,7 @@ export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'ex
   const accOpts = accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(init?.account_id ?? '') ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('');
   const accName = (id: number | null | undefined): string => (id == null ? '' : accounts.find((a) => a.id === id)?.name ?? '');
 
-  let cats = catOptions(kind);
-  if (init?.category) {
-    const lit = `<option>${escAttr(init.category)}</option>`;
-    cats = cats.includes(lit)
-      ? cats.replace(lit, `<option selected>${escAttr(init.category)}</option>`)
-      : `<option selected>${escAttr(init.category)}</option>${cats}`;
-  }
+  const cats = catOptions(kind, [], init?.category ?? '');
 
   const fields: string[] = [];
   if (init?.lockKind) {
@@ -138,6 +193,17 @@ export function txForm(accounts: Array<{ id: number; name: string }>, kind = 'ex
 
   fields.push(
     `<label for="f-cat">Kategori</label><select id="f-cat">${cats}</select>`,
+    `<div id="f-cat-controls"${kind === 'transfer' ? ' hidden' : ''}>
+      <button type="button" class="btn-ghost" id="f-cat-add" style="margin-top:8px">+ Kategori baru</button>
+      <div id="f-cat-editor" hidden>
+        <label for="f-cat-name">Nama kategori baru</label>
+        <input id="f-cat-name" maxlength="60" placeholder="Misalnya: Servis Motor atau Freelance" />
+        <div class="row" style="margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="btn-ghost" id="f-cat-save">Tambah kategori</button>
+          <button type="button" class="btn-ghost" id="f-cat-cancel">Batal</button>
+        </div>
+      </div>
+    </div><div class="muted" id="f-cat-status" role="status"></div>`,
     `<label for="f-date">Tanggal &amp; waktu</label><input id="f-date" type="datetime-local" value="${init?.occurred_at ? toLocalInput(init.occurred_at) : ''}" />
     <div class="muted" style="margin-top:-6px">Kosongkan = waktu sekarang.</div>`,
     `<label for="f-note">Catatan</label><input id="f-note" value="${escAttr(init?.note ?? '')}" placeholder="cth. Kopi" />`,
