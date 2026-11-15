@@ -1,5 +1,6 @@
 import { api } from '../lib/api.js';
-import { formatIdr, fmtDate } from '../lib/format.js';
+import { formatIdr, fmtTransactionDate } from '../lib/format.js';
+import { witaMonth } from '../../shared/time.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal, txForm, wireCatOptions, wireTxAccounts, readOccurredAt, type TxFormInit, type TxAccountRef } from '../components/modal.js';
 import { isDesktop } from '../lib/state.js';
@@ -43,17 +44,11 @@ async function loadPage(append: boolean): Promise<void> {
   if (page.length < PAGE) txExhausted = true;
 }
 
-/** Tanggal transaksi + waktu bila bukan tengah malam. */
-function tDate(iso: string): string {
-  const t = iso.length > 10 ? iso.slice(11, 16) : '';
-  return t && t !== '00:00' ? `${fmtDate(iso)} • ${t}` : fmtDate(iso);
-}
-
 export async function renderTransactions(el: HTMLElement): Promise<void> {
   if (!el.innerHTML.trim()) el.innerHTML = `<div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>`;
   const accounts = (await api.get('/api/accounts')) as AccountRef[];
   if (!fMonthDefaulted) {
-    fMonth = new Date().toISOString().slice(0, 7);
+    fMonth = witaMonth();
     fMonthDefaulted = true;
   }
   if (!txCache) await loadPage(false);
@@ -62,7 +57,7 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
   const cats = [...new Set(txs.map((t) => t.category))].sort();
 
   const filtered = txs
-    .filter((t) => (fMonth ? t.occurred_at.slice(0, 7) === fMonth : true))
+    .filter((t) => (fMonth ? witaMonth(t.occurred_at) === fMonth : true))
     .filter((t) => (fCat ? t.category === fCat : true))
     .filter((t) => (fAcc ? String(t.account_id) === fAcc : true))
     .filter((t) => {
@@ -206,7 +201,7 @@ function txTable(txs: Tx[], accName: Map<number, string>): string {
     <th class="sortable" data-sort="amount" tabindex="0" role="button" aria-label="Urutkan nominal" style="text-align:right">Nominal${arrow('amount')}</th><th style="text-align:right">Aksi</th>
   </tr></thead><tbody>${txs
     .map(
-      (t) => `<tr><td style="white-space:nowrap">${escHtml(tDate(t.occurred_at))}</td>
+      (t) => `<tr><td style="white-space:nowrap">${escHtml(fmtTransactionDate(t.occurred_at))}</td>
       <td>${escHtml(t.note) || '—'}${t.kind === 'transfer' ? `<div class="muted">→ ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}</div>` : ''}</td>
       <td>${escHtml(t.category)}</td><td>${escHtml(accName.get(t.account_id ?? -1) ?? '—')}</td>
       <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : ''}"><strong>${t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : ''}${formatIdr(t.amount_idr)}</strong></td>
@@ -225,7 +220,7 @@ function txCards(txs: Tx[], accName: Map<number, string>): string {
       const amtSign = t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : '';
       return `<div class="between" style="padding:10px 0;border-bottom:1px solid var(--soft)">
       <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px;background:${avatarBg}">${avatarSign}</span>
-      <div><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(tDate(t.occurred_at))}</div></div></div>
+      <div><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(fmtTransactionDate(t.occurred_at))}</div></div></div>
       <div style="text-align:right"><div class="${amtCls}"><strong>${amtSign}${formatIdr(t.amount_idr)}</strong></div>
       <div class="row" style="gap:6px;justify-content:flex-end;margin-top:4px"><button class="btn-ghost" data-edit-id="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Ubah</button><button class="btn-ghost" data-del="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Hapus</button></div></div></div>`;
     })

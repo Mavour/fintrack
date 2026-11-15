@@ -1,6 +1,7 @@
 import { api } from '../lib/api.js';
 import { isScrollActive } from '../lib/scrollActivity.js';
-import { formatIdr, formatCompactIdr, formatPct } from '../lib/format.js';
+import { formatIdr, formatCompactIdr, formatPct, fmtDate } from '../lib/format.js';
+import { witaMonth } from '../../shared/time.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { wealthTrendCard } from '../lib/trend.js';
 import { bindTrendHover } from '../components/trendline.js';
@@ -77,7 +78,7 @@ export function applyLiveHome(el: HTMLElement, frame: PortfolioFrame): void {
 export async function renderHome(el: HTMLElement, background = false): Promise<void> {
   const routeHash = background ? location.hash : '';
   if (!el.innerHTML.trim()) el.innerHTML = `<div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>`.repeat(3);
-  const month = new Date().toISOString().slice(0, 7);
+  const month = witaMonth();
   const [dash, accounts, txs, pf] = await Promise.all([
     api.get(`/api/dashboard?month=${month}`) as Promise<{
       total_wealth_idr: number; total_pl_idr: number;
@@ -192,7 +193,7 @@ function recentTx(
   if (txs.length === 0) return '<div class="empty">Belum ada transaksi</div>';
   return `<table class="data" style="min-width:0"><tbody>${txs
     .map(
-      (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''} • ${escHtml(t.occurred_at.slice(0, 10))}</div></td>
+      (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''} • ${escHtml(fmtDate(t.occurred_at))}</div></td>
     <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : ''}"><strong>${t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : ''}${formatIdr(t.amount_idr)}</strong></td></tr>`,
     )
     .join('')}</tbody></table>`;

@@ -1,6 +1,7 @@
 import { icons } from './icons.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { api } from '../lib/api.js';
+import { toWitaInput, fromWitaInput } from '../../shared/time.js';
 
 export { escAttr };
 
@@ -166,19 +167,11 @@ const KIND_LABEL: Record<string, string> = {
   withdrawal: 'Tarik Tunai',
 };
 
-/** ISO → nilai <input type="datetime-local"> (waktu lokal pembaca). */
-function toLocalInput(iso: string): string {
-  const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
-  if (isNaN(d.getTime())) return '';
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 /** Baca input tanggal-waktu dari body form. Kosong = waktu sekarang. */
 export function readOccurredAt(body: HTMLElement): string {
   const el = body.querySelector('#f-date') as HTMLInputElement | null;
   const v = el?.value ?? '';
-  return v ? new Date(v).toISOString() : new Date().toISOString();
+  return v ? fromWitaInput(v) : new Date().toISOString();
 }
 
 export interface TxFormInit {
@@ -252,7 +245,7 @@ export function txForm(accounts: TxAccountRef[], kind = 'expense', init?: TxForm
         </div>
       </div>
     </div><div class="muted" id="f-cat-status" role="status"></div>`,
-    `<label for="f-date">Tanggal &amp; waktu</label><input id="f-date" type="datetime-local" value="${init?.occurred_at ? toLocalInput(init.occurred_at) : ''}" />
+    `<label for="f-date">Tanggal &amp; waktu (WITA)</label><input id="f-date" type="datetime-local" value="${init?.occurred_at ? toWitaInput(init.occurred_at) : ''}" />
     <div class="muted" style="margin-top:-6px">Kosongkan = waktu sekarang.</div>`,
     `<label for="f-note">Catatan</label><input id="f-note" value="${escAttr(init?.note ?? '')}" placeholder="cth. Kopi" />`,
     `<button class="btn-primary" id="f-save">Simpan</button>`,

@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getUnifiedPortfolio } from './portfolioService.js';
 import { getCachedUsdIdr } from '../providers/fxRate.js';
+import { witaMonth } from '../../shared/time.js';
 
 export interface DashboardSummary {
   total_cash_idr: number;
@@ -15,14 +16,14 @@ export interface DashboardSummary {
 }
 
 export function getDashboard(db: Database.Database, month?: string): DashboardSummary {
-  const m = month ?? new Date().toISOString().slice(0, 7);
+  const m = month ?? witaMonth();
   const cashRow = db
     .prepare('SELECT COALESCE(SUM(balance_idr),0) AS t FROM accounts WHERE is_active = 1')
     .get() as { t: number };
   const flowRows = db
     .prepare(
       `SELECT kind, COALESCE(SUM(amount_idr),0) AS t FROM transactions
-       WHERE strftime('%Y-%m', occurred_at) = ? GROUP BY kind`,
+       WHERE strftime('%Y-%m', occurred_at, '+8 hours') = ? GROUP BY kind`,
     )
     .all(m) as Array<{ kind: string; t: number }>;
   const income = flowRows.find((r) => r.kind === 'income')?.t ?? 0;
@@ -68,7 +69,7 @@ export function getDashboard(db: Database.Database, month?: string): DashboardSu
   const expenseRows = db
     .prepare(
       `SELECT category, SUM(amount_idr) AS total_idr FROM transactions
-       WHERE kind = 'expense' AND strftime('%Y-%m', occurred_at) = ?
+       WHERE kind = 'expense' AND strftime('%Y-%m', occurred_at, '+8 hours') = ?
        GROUP BY category ORDER BY total_idr DESC`,
     )
     .all(m) as Array<{ category: string; total_idr: number }>;

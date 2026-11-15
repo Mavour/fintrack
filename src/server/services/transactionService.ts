@@ -190,7 +190,7 @@ export function listTransactions(
   }
   if (month) {
     // month format YYYY-MM
-    where.push(`strftime('%Y-%m', occurred_at) = ?`);
+    where.push(`strftime('%Y-%m', occurred_at, '+8 hours') = ?`);
     params.push(month);
   }
   const sql = `SELECT * FROM transactions ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?`;

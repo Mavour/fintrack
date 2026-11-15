@@ -1,3 +1,5 @@
+import { WITA_ZONE, parseTimestamp, toWitaInput } from '../../shared/time.js';
+
 export function formatIdr(n: number): string {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -43,6 +45,7 @@ export function timeAgo(iso: string | null): string {
 
 export function todayLong(): string {
   return new Intl.DateTimeFormat('id-ID', {
+    timeZone: WITA_ZONE,
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -51,6 +54,10 @@ export function todayLong(): string {
 }
 
 export function fmtDate(iso: string): string {
-  const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
-  return new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+  const d = parseTimestamp(iso);
+  return new Intl.DateTimeFormat('id-ID', { timeZone: WITA_ZONE, day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+}
+
+export function fmtTransactionDate(iso: string): string {
+  return iso.length <= 10 ? fmtDate(iso) : `${fmtDate(iso)} • ${toWitaInput(iso).slice(11, 16)} WITA`;
 }
