@@ -334,7 +334,7 @@ a.wallet-chip:hover { border-color: var(--primary); text-decoration: none; box-s
 .avatar {
   width: 42px; height: 42px; border-radius: 50%; flex: none;
   display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 17px;
-  background: linear-gradient(135deg, var(--primary), var(--purple));
+  background: linear-gradient(135deg, var(--dark), var(--logo-box));
   position: relative; overflow: hidden;
   box-shadow: 0 0 0 2.5px #fff, 0 0 0 4px var(--border);
 }
@@ -472,7 +472,7 @@ table.data tr.clickable:hover td { background: var(--primary-soft); }
 :is(.modal, .drawer, .badge-pop-body) *::-webkit-scrollbar-button { display: none; }
 .modal::before {
   content: ''; display: block; width: 44px; height: 5px; border-radius: 99px;
-  background: linear-gradient(90deg, var(--primary), var(--pink), var(--amber)); margin: 0 auto 12px;
+  background: var(--primary); margin: 0 auto 12px;
 }
 .modal label { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin-top: 16px; }
 .modal [data-body] > label:first-child { margin-top: 0; }
@@ -550,6 +550,7 @@ table.data tr.clickable:hover td { background: var(--primary-soft); }
 [data-theme="dark"] select,
 [data-theme="dark"] .modal { background: var(--card); }
 [data-theme="dark"] .modal { border-top-color: var(--primary); }
+[data-theme="dark"] .modal::before { background: #fff; }
 [data-theme="dark"] table.data tr.clickable:hover td,
 [data-theme="dark"] table.data.assets tr[data-cost]:hover td { background: #1b2650; }
 [data-theme="dark"] .pill.up { background: #0d3327; color: #34d399; }
