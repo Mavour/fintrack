@@ -188,12 +188,12 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
 }
 
 function recentTx(
-  txs: Array<{ category: string; note: string; amount_idr: number; occurred_at: string; kind: string }>,
+  txs: Array<{ category: string; note: string; amount_idr: number; occurred_at: string; kind: string; investment_symbol?: string | null }>,
 ): string {
   if (txs.length === 0) return '<div class="empty">Belum ada transaksi</div>';
   return `<table class="data" style="min-width:0"><tbody>${txs
     .map(
-      (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''} • ${escHtml(fmtDate(t.occurred_at))}</div></td>
+      (t) => `<tr><td style="padding-top:13px;padding-bottom:13px"><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml([t.investment_symbol, t.note, fmtDate(t.occurred_at)].filter(Boolean).join(' • '))}</div></td>
     <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : ''}"><strong>${t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : ''}${formatIdr(t.amount_idr)}</strong></td></tr>`,
     )
     .join('')}</tbody></table>`;

@@ -8,6 +8,7 @@ import { isDesktop } from '../lib/state.js';
 interface Tx {
   id: number; kind: string; amount_idr: number; account_id: number | null;
   to_account_id: number | null; category: string; note: string; occurred_at: string;
+  investment_symbol?: string | null;
 }
 
 type AccountRef = TxAccountRef;
@@ -59,10 +60,11 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
   const filtered = txs
     .filter((t) => (fMonth ? witaMonth(t.occurred_at) === fMonth : true))
     .filter((t) => (fCat ? t.category === fCat : true))
-    .filter((t) => (fAcc ? String(t.account_id) === fAcc : true))
+    .filter((t) => !fAcc || String(t.account_id) === fAcc || String(t.to_account_id) === fAcc)
     .filter((t) => {
       const q = fSearch.trim().toLowerCase();
-      return !q || t.note.toLowerCase().includes(q) || t.category.toLowerCase().includes(q);
+      return !q || t.note.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)
+        || t.investment_symbol?.toLowerCase().includes(q);
     })
     .sort((a, b) =>
       sortKey === 'date'
@@ -202,7 +204,7 @@ function txTable(txs: Tx[], accName: Map<number, string>): string {
   </tr></thead><tbody>${txs
     .map(
       (t) => `<tr><td style="white-space:nowrap">${escHtml(fmtTransactionDate(t.occurred_at))}</td>
-      <td>${escHtml(t.note) || '—'}${t.kind === 'transfer' ? `<div class="muted">→ ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}</div>` : ''}</td>
+      <td>${escHtml([t.investment_symbol, t.note].filter(Boolean).join(' • ')) || '—'}${t.kind === 'transfer' ? `<div class="muted">→ ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}</div>` : ''}</td>
       <td>${escHtml(t.category)}</td><td>${escHtml(accName.get(t.account_id ?? -1) ?? '—')}</td>
       <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : ''}"><strong>${t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : ''}${formatIdr(t.amount_idr)}</strong></td>
       <td style="text-align:right;white-space:nowrap"><button class="btn-ghost" data-edit-id="${t.id}" style="min-height:40px">Ubah</button> <button class="btn-ghost" data-del="${t.id}" style="min-height:40px">Hapus</button></td></tr>`,
@@ -220,7 +222,7 @@ function txCards(txs: Tx[], accName: Map<number, string>): string {
       const amtSign = t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : '';
       return `<div class="between" style="padding:10px 0;border-bottom:1px solid var(--soft)">
       <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px;background:${avatarBg}">${avatarSign}</span>
-      <div><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml(t.note) || ''}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(fmtTransactionDate(t.occurred_at))}</div></div></div>
+      <div><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml([t.investment_symbol, t.note].filter(Boolean).join(' • '))}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(fmtTransactionDate(t.occurred_at))}</div></div></div>
       <div style="text-align:right"><div class="${amtCls}"><strong>${amtSign}${formatIdr(t.amount_idr)}</strong></div>
       <div class="row" style="gap:6px;justify-content:flex-end;margin-top:4px"><button class="btn-ghost" data-edit-id="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Ubah</button><button class="btn-ghost" data-del="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Hapus</button></div></div></div>`;
     })
@@ -265,11 +267,14 @@ function openEdit(el: HTMLElement, tx: Tx, accounts: AccountRef[]): void {
     note: tx.note,
     occurred_at: tx.occurred_at,
     lockKind: true,
-    lockAccounts: true,
   };
-  const kind = tx.kind === 'transfer' && tx.category === 'Tarik Tunai' ? 'withdrawal' : tx.kind;
+  const kind = tx.investment_symbol ? 'investment_withdrawal'
+    : tx.kind === 'transfer' && tx.category === 'Tarik Tunai' ? 'withdrawal' : tx.kind;
   const { close, el: body } = openModal(`Ubah Transaksi`, txForm(accounts, kind, init));
   wireCatOptions(body);
+  wireTxAccounts(body, accounts);
+  const dateField = body.querySelector<HTMLInputElement>('#f-date')!;
+  const originalDate = dateField.value;
   (body.querySelector('#f-save') as HTMLButtonElement).onclick = async (e) => {
     const btn = e.target as HTMLButtonElement;
     if (btn.disabled) return;
@@ -279,9 +284,11 @@ function openEdit(el: HTMLElement, tx: Tx, accounts: AccountRef[]): void {
     try {
       await api.patch(`/api/transactions/${tx.id}`, {
         amount_idr: Number(v('#f-amount')),
+        account_id: Number(v('#f-acc')),
+        ...(tx.kind === 'transfer' ? { to_account_id: Number(v('#f-to')) } : {}),
         category: v('#f-cat') || tx.category,
         note: v('#f-note'),
-        occurred_at: readOccurredAt(body),
+        ...(dateField.value !== originalDate ? { occurred_at: readOccurredAt(body) } : {}),
       });
       close();
       resetCache();

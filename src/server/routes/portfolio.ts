@@ -10,6 +10,7 @@ import {
   setCostBasis,
   deleteCostBasis,
 } from '../services/portfolioService.js';
+import { createInvestmentWithdrawal, InvestmentWithdrawalSchema } from '../services/transactionService.js';
 
 export function registerPortfolioRoutes(app: FastifyInstance, db: Database.Database): void {
   // Terpadu: aset manual (duplikat wallet disembunyikan total, token tanpa
@@ -44,12 +45,22 @@ export function registerPortfolioRoutes(app: FastifyInstance, db: Database.Datab
     }
   });
 
+  app.post('/api/portfolio/withdrawals', async (req, reply) => {
+    try {
+      return reply.code(201).send(createInvestmentWithdrawal(db, InvestmentWithdrawalSchema.parse(req.body)));
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      return reply.code(err.statusCode ?? 400).send({ error: err.message ?? 'Pencairan gagal disimpan' });
+    }
+  });
+
   app.delete('/api/portfolio/:symbol', async (req: FastifyRequest<{ Params: { symbol: string } }>, reply) => {
     try {
       deleteAsset(db, req.params.symbol.toUpperCase());
       return { ok: true };
     } catch (e: unknown) {
-      return reply.code(404).send({ error: 'Asset not found' });
+      const err = e as { statusCode?: number; message?: string };
+      return reply.code(err.statusCode ?? 400).send({ error: err.message ?? 'Asset not found' });
     }
   });
 

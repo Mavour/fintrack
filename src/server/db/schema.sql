@@ -60,6 +60,16 @@ CREATE TABLE IF NOT EXISTS assets (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS investment_withdrawals (
+  transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+  symbol TEXT NOT NULL,
+  asset_id INTEGER REFERENCES assets(id) ON DELETE RESTRICT,
+  qty TEXT,
+  cost_idr INTEGER CHECK (cost_idr >= 0),
+  CHECK ((asset_id IS NULL AND qty IS NULL AND cost_idr IS NULL) OR (asset_id IS NOT NULL AND qty IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_investment_withdrawals_asset ON investment_withdrawals(asset_id);
+
 -- Maps user-facing symbol -> provider-specific id (e.g. HYPE -> hyperliquid)
 CREATE TABLE IF NOT EXISTS asset_map (
   symbol TEXT PRIMARY KEY,

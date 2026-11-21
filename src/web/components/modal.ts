@@ -40,6 +40,7 @@ export const TX_CATEGORIES: Record<string, string[]> = {
   income: ['Gaji', 'Bonus', 'Hadiah', 'Bunga & Dividen', 'Lainnya'],
   transfer: ['Pindah Dana'],
   withdrawal: ['Tarik Tunai'],
+  investment_withdrawal: ['Pencairan Investasi'],
 };
 
 export interface TxAccountRef {
@@ -67,12 +68,20 @@ export function wireTxAccounts(body: HTMLElement, accounts: TxAccountRef[]): voi
   };
   const sync = () => {
     const withdrawal = kind.value === 'withdrawal';
-    const banks = withdrawal ? accounts.filter((a) => a.type === 'bank' && a.is_active) : accounts;
-    const cash = withdrawal ? accounts.filter((a) => a.type === 'cash' && a.is_active) : accounts;
+    const investment = kind.value === 'investment_withdrawal';
+    const editing = kind.tagName === 'INPUT';
+    const current = (a: TxAccountRef, field: HTMLSelectElement) => editing && String(a.id) === field.value;
+    const banks = withdrawal || investment
+      ? accounts.filter((a) => (a.type === 'bank' && a.is_active) || current(a, from))
+      : accounts;
+    const cash = withdrawal
+      ? accounts.filter((a) => (a.type === 'cash' && a.is_active) || current(a, to))
+      : accounts;
     fill(from, banks, 'Belum ada akun bank aktif');
     fill(to, cash, 'Belum ada akun tunai aktif');
     toWrap.style.display = kind.value === 'transfer' || withdrawal ? 'block' : 'none';
-    body.querySelector('label[for="f-acc"]')!.textContent = withdrawal ? 'Dari bank' : 'Dari akun';
+    body.querySelector('label[for="f-acc"]')!.textContent = withdrawal ? 'Dari bank'
+      : investment ? 'Rekening tujuan' : kind.value === 'income' ? 'Masuk ke akun' : 'Dari akun';
     body.querySelector('label[for="f-to"]')!.textContent = withdrawal ? 'Masuk ke akun tunai' : 'Ke akun';
     hint.hidden = !withdrawal;
     const missing = withdrawal && (!banks.length || !cash.length);
@@ -165,6 +174,7 @@ const KIND_LABEL: Record<string, string> = {
   income: 'Pemasukan (Top Up)',
   transfer: 'Transfer',
   withdrawal: 'Tarik Tunai',
+  investment_withdrawal: 'Pencairan Investasi',
 };
 
 /** Baca input tanggal-waktu dari body form. Kosong = waktu sekarang. */
@@ -188,10 +198,11 @@ export interface TxFormInit {
 }
 
 export function txForm(accounts: TxAccountRef[], kind = 'expense', init?: TxFormInit): string {
-  const accOpts = accounts.map((a) => `<option value="${a.id}" ${String(a.id) === String(init?.account_id ?? '') ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('');
+  const accOpts = (selected?: number | null) => accounts.map((a) => `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('');
   const accName = (id: number | null | undefined): string => (id == null ? '' : accounts.find((a) => a.id === id)?.name ?? '');
 
   const cats = catOptions(kind, [], init?.category ?? '');
+  const fixedCategory = kind === 'withdrawal' || kind === 'investment_withdrawal';
 
   const fields: string[] = [];
   if (init?.lockKind) {
@@ -226,15 +237,15 @@ export function txForm(accounts: TxAccountRef[], kind = 'expense', init?: TxForm
     fields.push(`<div id="f-to-wrap" style="display:none"></div>`);
   } else {
     fields.push(
-      `<label for="f-acc">Dari akun</label><select id="f-acc">${accOpts}</select>`,
-      `<div id="f-to-wrap" style="display:none"><label for="f-to">Ke akun</label><select id="f-to">${accOpts}</select></div>`,
+      `<label for="f-acc">Dari akun</label><select id="f-acc">${accOpts(init?.account_id)}</select>`,
+      `<div id="f-to-wrap" style="display:none"><label for="f-to">Ke akun</label><select id="f-to">${accOpts(init?.to_account_id)}</select></div>`,
     );
   }
 
   fields.push(
     `<div id="f-withdrawal-hint" class="muted" hidden style="margin-top:8px"></div>`,
-    `<label for="f-cat">Kategori</label><select id="f-cat"${kind === 'withdrawal' ? ' disabled' : ''}>${cats}</select>`,
-    `<div id="f-cat-controls"${kind === 'transfer' || kind === 'withdrawal' ? ' hidden' : ''}>
+    `<label for="f-cat">Kategori</label><select id="f-cat"${fixedCategory ? ' disabled' : ''}>${cats}</select>`,
+    `<div id="f-cat-controls"${kind === 'transfer' || fixedCategory ? ' hidden' : ''}>
       <button type="button" class="btn-ghost" id="f-cat-add" style="margin-top:8px">+ Kategori baru</button>
       <div id="f-cat-editor" hidden>
         <label for="f-cat-name">Nama kategori baru</label>

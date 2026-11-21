@@ -109,8 +109,61 @@ export function listAssets(db: Database.Database, type?: AssetType): Asset[] {
 }
 
 export function deleteAsset(db: Database.Database, symbol: string): void {
-  const info = db.prepare('DELETE FROM assets WHERE symbol = ?').run(symbol);
-  if (info.changes === 0) throw Object.assign(new Error('Asset not found'), { statusCode: 404 });
+  try {
+    const info = db.prepare('DELETE FROM assets WHERE symbol = ?').run(symbol);
+    if (info.changes === 0) throw Object.assign(new Error('Asset not found'), { statusCode: 404 });
+  } catch (err) {
+    if ((err as { code?: string }).code === 'SQLITE_CONSTRAINT_TRIGGER') {
+      throw Object.assign(new Error('Aset ini memiliki riwayat pencairan. Jika sudah habis, simpan jumlahnya sebagai 0.'), { statusCode: 409 });
+    }
+    throw err;
+  }
+}
+
+export interface WithdrawnAsset {
+  asset_id: number;
+  qty: string;
+  cost_idr: number | null;
+}
+
+const AssetQty = Decimal.clone({ precision: 80 });
+
+export function withdrawAssetUnits(db: Database.Database, symbol: string, units: string): WithdrawnAsset {
+  const asset = getAssetBySymbol(db, symbol);
+  if (!asset) throw Object.assign(new Error('Aset tidak ditemukan'), { statusCode: 404 });
+  if (asset.type === 'saham' || asset.superseded_by_wallet) {
+    throw Object.assign(new Error('Pencairan unit tersedia untuk crypto dan reksadana yang dicatat manual'), { statusCode: 400 });
+  }
+  const sold = new AssetQty(units);
+  const held = new AssetQty(asset.qty);
+  const remaining = held.minus(sold);
+  if (remaining.isNegative() || !held.minus(remaining).eq(sold) || !remaining.plus(sold).eq(held)) {
+    throw Object.assign(new Error('Jumlah unit melebihi saldo aset atau presisi yang didukung'), { statusCode: 400 });
+  }
+  const totalCost = asset.total_cost_idr ?? null;
+  const soldCost = totalCost === null ? null : sold.div(held).times(totalCost).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber();
+  db.prepare("UPDATE assets SET qty = ?, total_cost_idr = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(remaining.toString(), totalCost === null ? null : totalCost - soldCost!, asset.id);
+  return { asset_id: asset.id, qty: sold.toString(), cost_idr: soldCost };
+}
+
+export function restoreWithdrawnAsset(db: Database.Database, withdrawal: WithdrawnAsset): void {
+  const asset = db.prepare('SELECT * FROM assets WHERE id = ?').get(withdrawal.asset_id) as Asset;
+  const held = new AssetQty(asset.qty);
+  const sold = new AssetQty(withdrawal.qty);
+  const restored = held.plus(sold);
+  if (!restored.minus(held).eq(sold) || !restored.minus(sold).eq(held)) {
+    throw Object.assign(new Error('Jumlah unit melebihi presisi yang didukung'), { statusCode: 400 });
+  }
+  const totalCost = asset.total_cost_idr == null && withdrawal.cost_idr == null
+    ? null
+    : (asset.total_cost_idr ?? costBasis(asset.qty, asset.avg_buy_price_idr))
+      + (withdrawal.cost_idr ?? costBasis(withdrawal.qty, asset.avg_buy_price_idr));
+  if (totalCost !== null && !Number.isSafeInteger(totalCost)) {
+    throw Object.assign(new Error('Total modal melebihi batas yang didukung'), { statusCode: 400 });
+  }
+  db.prepare("UPDATE assets SET qty = ?, total_cost_idr = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(restored.toString(), totalCost, asset.id);
 }
 
 export function valuateAsset(

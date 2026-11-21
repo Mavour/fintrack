@@ -23,7 +23,8 @@ export function getDashboard(db: Database.Database, month?: string): DashboardSu
   const flowRows = db
     .prepare(
       `SELECT kind, COALESCE(SUM(amount_idr),0) AS t FROM transactions
-       WHERE strftime('%Y-%m', occurred_at, '+8 hours') = ? GROUP BY kind`,
+       WHERE strftime('%Y-%m', occurred_at, '+8 hours') = ?
+         AND id NOT IN (SELECT transaction_id FROM investment_withdrawals) GROUP BY kind`,
     )
     .all(m) as Array<{ kind: string; t: number }>;
   const income = flowRows.find((r) => r.kind === 'income')?.t ?? 0;

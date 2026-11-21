@@ -77,6 +77,7 @@ export function readDormSnapshot(db: Database.Database, options: DormSnapshotOpt
     const knownIdr = cash.value + portfolio.total_value_idr;
     const rows = db.prepare(`SELECT id, kind, amount_idr, category, note, occurred_at FROM transactions
       WHERE kind IN ('income','expense') AND julianday(occurred_at) >= julianday(?) AND julianday(occurred_at) <= julianday(?)
+      AND id NOT IN (SELECT transaction_id FROM investment_withdrawals)
       ORDER BY julianday(occurred_at) DESC, id DESC`).all(since, ts) as TxRow[];
     const cashflowIdr = { todayIncomeIdr: 0, todayExpenseIdr: 0, last7dIncomeIdr: 0, last7dExpenseIdr: 0, last30dIncomeIdr: 0, last30dExpenseIdr: 0 };
     let monthSpentIdr = 0;
@@ -93,6 +94,7 @@ export function readDormSnapshot(db: Database.Database, options: DormSnapshotOpt
     const cashflow = Object.fromEntries(Object.entries(cashflowIdr).map(([key, value]) => [key.replace(/Idr$/, 'Usd'), toUsd(value)]));
     const recent = db.prepare(`SELECT id, kind, amount_idr, category, note, occurred_at FROM transactions
       WHERE kind IN ('income','expense') AND julianday(occurred_at) <= julianday(?)
+      AND id NOT IN (SELECT transaction_id FROM investment_withdrawals)
       ORDER BY julianday(occurred_at) DESC, id DESC LIMIT 60`).all(ts) as TxRow[];
     const transactions = recent.map(tx => ({ id: `tx-${tx.id}`, ts: utc(tx.occurred_at)!, kind: tx.kind, category: tx.category, amountUsd: toUsd(tx.amount_idr), amountIdr: tx.amount_idr, note: tx.note }));
     const monthly = options.monthlyBudgetIdr;

@@ -7,7 +7,8 @@ import { coinAvatar } from '../lib/coinIcons.js';
 import { wealthTrendCard } from '../lib/trend.js';
 import { bindTrendHover } from '../components/trendline.js';
 import { donut } from '../components/donut.js';
-import { openModal } from '../components/modal.js';
+import { openModal, readOccurredAt, type TxAccountRef } from '../components/modal.js';
+import { invalidateTxCache } from './transactions.js';
 import { isDesktop, isPrivat } from '../lib/state.js';
 import { chainBadge, walletChip, walletUrl } from '../lib/chains.js';
 
@@ -276,7 +277,8 @@ export async function renderPortfolio(el: HTMLElement, background = false): Prom
     r.k === 'm' ? r.a.total_cost_idr != null || r.a.avg_buy_price_idr > 0 : r.w.has_cost;
   const buttons =
     `<button class="btn-primary" id="btn-add">+ Tambah Aset</button>
-     <button class="btn-ghost" id="btn-sync">Perbarui Harga</button>`;
+     <button class="btn-ghost" id="btn-sync">Perbarui Harga</button>
+     <button class="btn-ghost" id="btn-wallet-withdraw">Catat Pencairan Wallet</button>`;
   const analysis = shown.some(withBuyPrice)
     ? `<div class="card"><strong>Analisis Keuntungan</strong>
       <div class="between" style="margin-top:10px"><span class="muted">Laba mengambang</span><strong class="${data.floating_pl_idr >= 0 ? 'pos' : 'neg'}">${show(data.floating_pl_idr)}</strong></div>
@@ -405,6 +407,7 @@ export async function renderPortfolio(el: HTMLElement, background = false): Prom
     renderPortfolio(el);
   };
   document.getElementById('btn-add')!.onclick = () => openAssetForm(el);
+  document.getElementById('btn-wallet-withdraw')!.onclick = () => openWithdrawalForm(el);
   bindRowEdit(el);
   bindTrendHover(el);
 }
@@ -588,10 +591,16 @@ function openAssetDetail(el: HTMLElement, symbol: string): void {
       ${kv('Sumber harga', a.price_source ?? '—')}
       ${kv('Diperbarui', a.price_fetched_at ? timeAgo(a.price_fetched_at) : '—')}
       ${a.is_stale ? '<div class="muted" style="margin-top:4px">Harga basi — coba Perbarui Harga.</div>' : ''}
-      <button class="btn-primary" id="d-edit">Ubah aset</button>`);
+      <button class="btn-primary" id="d-edit">Ubah aset</button>
+      ${(isCrypto || a.type === 'reksadana') && Number(a.qty) > 0 ? '<button class="btn-ghost" id="d-withdraw" style="width:100%;margin-top:8px">Catat pencairan</button>' : ''}`);
     (body.querySelector('#d-edit') as HTMLButtonElement).onclick = () => {
       close();
       openAssetForm(el, a.symbol);
+    };
+    const withdrawButton = body.querySelector<HTMLButtonElement>('#d-withdraw');
+    if (withdrawButton) withdrawButton.onclick = () => {
+      close();
+      openWithdrawalForm(el, a);
     };
     return;
   }
@@ -623,6 +632,65 @@ function openAssetDetail(el: HTMLElement, symbol: string): void {
   // Fallback: simbol tidak dikenal (mis. data basi) — buka form yang relevan.
   if (data_costCache[symU] != null) openCostForm(el, symbol);
   else openAssetForm(el, symbol);
+}
+
+function openWithdrawalForm(el: HTMLElement, asset?: AssetV): void {
+  const { close, el: body } = openModal(asset ? `Pencairan ${asset.symbol}` : 'Pencairan Crypto dari Wallet', `
+    <form id="withdraw-form">
+      <p class="muted" style="margin-top:0">${asset
+        ? 'Isi jumlah unit yang sudah dijual dan rupiah bersih yang diterima.'
+        : 'Catat rupiah yang sudah masuk ke bank. Jumlah token diperbarui lewat sinkronisasi wallet.'}</p>
+      ${asset
+        ? `<label for="w-qty">Jumlah unit yang dicairkan</label><input id="w-qty" inputmode="decimal" maxlength="40" placeholder="Tersedia ${escAttr(asset.qty)}" required />`
+        : '<label for="w-symbol">Simbol crypto</label><input id="w-symbol" maxlength="40" placeholder="Contoh: SOL" required />'}
+      <label for="w-amount">Rupiah bersih yang diterima</label><input id="w-amount" type="number" min="1" step="1" inputmode="numeric" required />
+      <label for="w-bank">Rekening tujuan</label><select id="w-bank" required disabled><option value="">Memuat rekening…</option></select>
+      <label for="f-date">Tanggal &amp; waktu (WITA)</label><input id="f-date" type="datetime-local" />
+      <label for="w-note">Catatan (opsional)</label><input id="w-note" maxlength="500" />
+      <p class="muted" id="w-status" role="status" hidden></p>
+      <button type="submit" class="btn-primary" id="w-save" disabled>Simpan pencairan</button>
+    </form>`);
+  const form = body.querySelector<HTMLFormElement>('#withdraw-form')!;
+  const bank = form.querySelector<HTMLSelectElement>('#w-bank')!;
+  const save = form.querySelector<HTMLButtonElement>('#w-save')!;
+  const status = form.querySelector<HTMLElement>('#w-status')!;
+  const input = (id: string) => form.querySelector<HTMLInputElement>(id)!.value.trim();
+  const showError = (message: string) => {
+    status.textContent = message;
+    status.hidden = false;
+  };
+  void api.get('/api/accounts').then((data) => {
+    const banks = (data as TxAccountRef[]).filter((a) => a.type === 'bank' && a.is_active);
+    bank.innerHTML = `<option value="">${banks.length ? 'Pilih rekening' : 'Belum ada rekening bank aktif'}</option>`
+      + banks.map((a) => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('');
+    if (banks.length) bank.disabled = save.disabled = false;
+  }).catch((err: Error) => showError(err.message));
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    if (save.disabled) return;
+    save.disabled = true;
+    save.classList.add('btn-loading');
+    status.hidden = true;
+    try {
+      await api.post('/api/portfolio/withdrawals', {
+        source: asset ? 'manual' : 'wallet',
+        symbol: asset?.symbol ?? input('#w-symbol'),
+        ...(asset ? { qty: input('#w-qty').replace(',', '.') } : {}),
+        amount_idr: Number(input('#w-amount')),
+        account_id: Number(bank.value),
+        note: input('#w-note'),
+        occurred_at: readOccurredAt(body),
+      });
+    } catch (err) {
+      showError((err as Error).message);
+      save.disabled = false;
+      save.classList.remove('btn-loading');
+      return;
+    }
+    invalidateTxCache();
+    close();
+    if (location.hash.startsWith('#/portofolio')) void renderPortfolio(el);
+  };
 }
 
 /** Harga beli token wallet: satu-satunya sumber P/L wallet. Kosong = "-". */
@@ -706,9 +774,13 @@ function openAssetForm(el: HTMLElement, symbol?: string): void {
   if (del && symbol) {
     del.onclick = async () => {
       if (!confirm(`Hapus aset ${symbol}?`)) return;
-      await api.del(`/api/portfolio/${symbol}`);
-      close();
-      renderPortfolio(el);
+      try {
+        await api.del(`/api/portfolio/${symbol}`);
+        close();
+        renderPortfolio(el);
+      } catch (err) {
+        alert((err as Error).message);
+      }
     };
   }
 }

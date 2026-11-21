@@ -1,5 +1,8 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
+import { getAccount } from './accountService.js';
+import { parseQty } from './money.js';
+import { restoreWithdrawnAsset, withdrawAssetUnits, type WithdrawnAsset } from './portfolioService.js';
 
 export const TxKindSchema = z.enum(['expense', 'income', 'transfer']);
 export type TxKind = z.infer<typeof TxKindSchema>;
@@ -15,6 +18,7 @@ export function listTransactionCategories(db: Database.Database): Record<'expens
     UNION
     SELECT kind, trim(category) AS name FROM transactions
     WHERE kind IN ('expense', 'income') AND length(trim(category)) BETWEEN 1 AND 60
+      AND id NOT IN (SELECT transaction_id FROM investment_withdrawals)
     ORDER BY name COLLATE NOCASE
   `).all() as Array<{ kind: 'expense' | 'income'; name: string }>;
   const result: Record<'expense' | 'income', string[]> = { expense: [], income: [] };
@@ -41,11 +45,29 @@ export const CreateTxSchema = z.object({
 });
 export type CreateTxInput = z.infer<typeof CreateTxSchema>;
 
+const InvestmentPaymentSchema = CreateTxSchema.pick({
+  amount_idr: true, account_id: true, note: true, occurred_at: true,
+}).extend({
+  symbol: z.string().trim().min(1).max(40).transform((symbol) => symbol.toUpperCase()),
+});
+export const InvestmentWithdrawalSchema = z.discriminatedUnion('source', [
+  InvestmentPaymentSchema.extend({
+    source: z.literal('manual'),
+    qty: z.string().trim().min(1).max(40).refine((qty) => {
+      try { return parseQty(qty).gt(0); }
+      catch { return false; }
+    }, 'Masukkan jumlah unit yang lebih dari 0'),
+  }),
+  InvestmentPaymentSchema.extend({ source: z.literal('wallet') }),
+]);
+
 export const UpdateTxSchema = z.object({
   category: z.string().min(1).max(60).optional(),
   note: z.string().max(500).optional(),
   occurred_at: z.string().optional(),
   amount_idr: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  account_id: z.number().int().positive().optional(),
+  to_account_id: z.number().int().positive().nullable().optional(),
 });
 export type UpdateTxInput = z.infer<typeof UpdateTxSchema>;
 
@@ -59,7 +81,11 @@ export interface Tx {
   note: string;
   occurred_at: string;
   created_at: string;
+  investment_symbol: string | null;
 }
+
+const selectTransactions = `SELECT transactions.*, investment_withdrawals.symbol AS investment_symbol
+  FROM transactions LEFT JOIN investment_withdrawals ON transaction_id = transactions.id`;
 
 function getBalance(db: Database.Database, id: number): number {
   const row = db.prepare('SELECT balance_idr FROM accounts WHERE id = ?').get(id) as
@@ -75,53 +101,53 @@ function validateBalance(balance: number): void {
     throw Object.assign(new Error('Balance exceeds safe integer limit'), { statusCode: 400 });
 }
 
-/** Apply a transaction effect to balances. sign=+1 apply, sign=-1 revert. */
-function applyEffect(
+type TxEffect = Pick<Tx, 'kind' | 'amount_idr' | 'account_id' | 'to_account_id'>;
+
+/** Validate the net adjustment so an edit only needs funds to cover the difference. */
+function adjustBalances(
   db: Database.Database,
-  tx: { kind: TxKind; amount_idr: number; account_id: number | null; to_account_id: number | null },
-  sign: 1 | -1,
+  before?: TxEffect,
+  after?: TxEffect,
 ): void {
-  if (tx.kind === 'expense') {
-    const bal = getBalance(db, tx.account_id!);
-    const next = bal - sign * tx.amount_idr;
+  const deltas = new Map<number, bigint>();
+  const add = (id: number, amount: bigint) => deltas.set(id, (deltas.get(id) ?? 0n) + amount);
+  const collect = (tx: TxEffect, sign: bigint) => {
+    const amount = BigInt(tx.amount_idr) * sign;
+    add(tx.account_id!, tx.kind === 'income' ? amount : -amount);
+    if (tx.kind === 'transfer') add(tx.to_account_id!, amount);
+  };
+  if (before) collect(before, -1n);
+  if (after) collect(after, 1n);
+  const update = db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`);
+  for (const [id, delta] of deltas) {
+    if (delta === 0n) continue;
+    const next = Number(BigInt(getBalance(db, id)) + delta);
     validateBalance(next);
-    db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      next,
-      tx.account_id,
-    );
-  } else if (tx.kind === 'income') {
-    const bal = getBalance(db, tx.account_id!);
-    const next = bal + sign * tx.amount_idr;
-    validateBalance(next);
-    db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      next,
-      tx.account_id,
-    );
-  } else {
-    const fromBal = getBalance(db, tx.account_id!);
-    const toBal = getBalance(db, tx.to_account_id!);
-    const nextFrom = fromBal - sign * tx.amount_idr;
-    const nextTo = toBal + sign * tx.amount_idr;
-    validateBalance(nextFrom);
-    validateBalance(nextTo);
-    db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      nextFrom,
-      tx.account_id,
-    );
-    db.prepare(`UPDATE accounts SET balance_idr = ?, updated_at = datetime('now') WHERE id = ?`).run(
-      nextTo,
-      tx.to_account_id,
-    );
+    update.run(next, id);
   }
 }
 
-function validateShape(input: CreateTxInput): void {
+function validateShape(input: Pick<Tx, 'kind' | 'account_id'> & { to_account_id?: number | null }): void {
   if (input.kind === 'transfer') {
     if (!input.to_account_id) throw Object.assign(new Error('to_account_id required'), { statusCode: 400 });
     if (input.to_account_id === input.account_id)
       throw Object.assign(new Error('Cannot transfer to same account'), { statusCode: 400 });
   } else if (input.to_account_id) {
     throw Object.assign(new Error('to_account_id only for transfer'), { statusCode: 400 });
+  }
+}
+
+export function requireActiveBank(db: Database.Database, id: number): void {
+  const account = getAccount(db, id);
+  if (account?.type !== 'bank' || !account.is_active) {
+    throw Object.assign(new Error('Pilih rekening bank yang aktif'), { statusCode: 400 });
+  }
+}
+
+function requireCashWithdrawalAccount(db: Database.Database, id: number, type: 'bank' | 'cash'): void {
+  const account = getAccount(db, id);
+  if (account?.type !== type || !account.is_active) {
+    throw Object.assign(new Error('Tarik tunai harus dari akun bank aktif ke akun tunai aktif'), { statusCode: 400 });
   }
 }
 
@@ -151,30 +177,32 @@ export function createTransaction(db: Database.Database, input: CreateTxInput): 
       );
   const atomic = db.transaction(() => {
     if (request.kind === 'withdrawal') {
-      const from = db.prepare('SELECT type, is_active FROM accounts WHERE id = ?').get(parsed.account_id) as { type: string; is_active: number } | undefined;
-      const to = db.prepare('SELECT type, is_active FROM accounts WHERE id = ?').get(parsed.to_account_id) as { type: string; is_active: number } | undefined;
-      if (from?.type !== 'bank' || !from.is_active || to?.type !== 'cash' || !to.is_active) {
-        throw Object.assign(new Error('Tarik tunai harus dari akun bank aktif ke akun tunai aktif'), { statusCode: 400 });
-      }
+      requireCashWithdrawalAccount(db, parsed.account_id, 'bank');
+      requireCashWithdrawalAccount(db, parsed.to_account_id!, 'cash');
     }
-    applyEffect(
-      db,
-      {
-        kind: parsed.kind,
-        amount_idr: parsed.amount_idr,
-        account_id: parsed.account_id,
-        to_account_id: parsed.kind === 'transfer' ? (parsed.to_account_id as number) : null,
-      },
-      1,
-    );
+    adjustBalances(db, undefined, { ...parsed, to_account_id: parsed.to_account_id ?? null });
     return insert();
   });
-  const info = atomic();
+  const info = atomic.immediate();
   return getTransaction(db, Number(info.lastInsertRowid))!;
 }
 
+export function createInvestmentWithdrawal(db: Database.Database, input: z.infer<typeof InvestmentWithdrawalSchema>): Tx {
+  const payment = InvestmentWithdrawalSchema.parse(input);
+  const { symbol } = payment;
+  return db.transaction(() => {
+    requireActiveBank(db, payment.account_id);
+    // Manual holdings supply units. Wallet holdings are updated by the wallet sync.
+    const withdrawn = payment.source === 'manual' ? withdrawAssetUnits(db, symbol, payment.qty) : null;
+    const tx = createTransaction(db, { ...payment, kind: 'income', category: 'Pencairan Investasi' });
+    db.prepare('INSERT INTO investment_withdrawals (transaction_id, symbol, asset_id, qty, cost_idr) VALUES (?, ?, ?, ?, ?)')
+      .run(tx.id, symbol, withdrawn?.asset_id ?? null, withdrawn?.qty ?? null, withdrawn?.cost_idr ?? null);
+    return { ...tx, investment_symbol: symbol };
+  }).immediate();
+}
+
 export function getTransaction(db: Database.Database, id: number): Tx | undefined {
-  return db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as Tx | undefined;
+  return db.prepare(`${selectTransactions} WHERE transactions.id = ?`).get(id) as Tx | undefined;
 }
 
 export function listTransactions(
@@ -185,7 +213,7 @@ export function listTransactions(
   const where: string[] = [];
   const params: unknown[] = [];
   if (kind) {
-    where.push('kind = ?');
+    where.push(kind === 'income' ? 'kind = ? AND transaction_id IS NULL' : 'kind = ?');
     params.push(kind);
   }
   if (month) {
@@ -193,51 +221,56 @@ export function listTransactions(
     where.push(`strftime('%Y-%m', occurred_at, '+8 hours') = ?`);
     params.push(month);
   }
-  const sql = `SELECT * FROM transactions ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?`;
+  const sql = `${selectTransactions} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?`;
   return db.prepare(sql).all(...params, limit, offset) as Tx[];
 }
 
-/**
- * Update supports changing amount/category/note/occurred_at.
- * Balance is corrected atomically by applying only the amount difference.
- * Account linkage is immutable (delete + recreate instead) to keep logic safe.
- */
 export function updateTransaction(db: Database.Database, id: number, input: UpdateTxInput): Tx {
   const parsed = UpdateTxSchema.parse(input);
-  const existing = getTransaction(db, id);
-  if (!existing) throw Object.assign(new Error('Transaction not found'), { statusCode: 404 });
-  const nextAmount = parsed.amount_idr ?? existing.amount_idr;
   const atomic = db.transaction(() => {
-    if (nextAmount !== existing.amount_idr) applyEffect(
-      db,
-      {
-        kind: existing.kind,
-        amount_idr: nextAmount - existing.amount_idr,
-        account_id: existing.account_id,
-        to_account_id: existing.to_account_id,
-      },
-      1,
-    );
+    const existing = getTransaction(db, id);
+    if (!existing) throw Object.assign(new Error('Transaction not found'), { statusCode: 404 });
+    const next = {
+      ...existing,
+      amount_idr: parsed.amount_idr ?? existing.amount_idr,
+      account_id: parsed.account_id ?? existing.account_id,
+      to_account_id: parsed.to_account_id === undefined ? existing.to_account_id : parsed.to_account_id,
+      category: parsed.category ?? existing.category,
+      note: parsed.note ?? existing.note,
+      occurred_at: parsed.occurred_at ?? existing.occurred_at,
+    };
+    validateShape(next);
+    const withdrawal = existing.kind === 'transfer' && existing.category === 'Tarik Tunai';
+    if (withdrawal) {
+      if (next.account_id !== existing.account_id) requireCashWithdrawalAccount(db, next.account_id!, 'bank');
+      if (next.to_account_id !== existing.to_account_id) requireCashWithdrawalAccount(db, next.to_account_id!, 'cash');
+    }
+    if (existing.investment_symbol && next.account_id !== existing.account_id) requireActiveBank(db, next.account_id!);
+    adjustBalances(db, existing, next);
     db.prepare(
-      `UPDATE transactions SET amount_idr = ?, category = ?, note = ?, occurred_at = ? WHERE id = ?`,
+      `UPDATE transactions SET amount_idr = ?, account_id = ?, to_account_id = ?, category = ?, note = ?, occurred_at = ? WHERE id = ?`,
     ).run(
-      nextAmount,
-      parsed.category ?? existing.category,
-      parsed.note ?? existing.note,
-      parsed.occurred_at ?? existing.occurred_at,
+      next.amount_idr, next.account_id, next.to_account_id,
+      withdrawal || existing.investment_symbol ? existing.category : next.category,
+      next.note, next.occurred_at,
       id,
     );
+    return getTransaction(db, id)!;
   });
-  atomic();
-  return getTransaction(db, id)!;
+  return atomic.immediate();
 }
 
 export function deleteTransaction(db: Database.Database, id: number): void {
-  const existing = getTransaction(db, id);
-  if (!existing) throw Object.assign(new Error('Transaction not found'), { statusCode: 404 });
   const atomic = db.transaction(() => {
-    applyEffect(db, existing, -1);
+    const existing = getTransaction(db, id);
+    if (!existing) throw Object.assign(new Error('Transaction not found'), { statusCode: 404 });
+    adjustBalances(db, existing);
+    if (existing.investment_symbol) {
+      const withdrawn = db.prepare('SELECT asset_id, qty, cost_idr FROM investment_withdrawals WHERE transaction_id = ? AND asset_id IS NOT NULL')
+        .get(id) as WithdrawnAsset | undefined;
+      if (withdrawn) restoreWithdrawnAsset(db, withdrawn);
+    }
     db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
   });
-  atomic();
+  atomic.immediate();
 }

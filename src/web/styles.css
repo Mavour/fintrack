@@ -1010,6 +1010,7 @@ details[open] > summary .detail-toggle { transform: rotate(180deg); }
   .portfolio-actions > .muted { display: none; }
   .portfolio-actions > .row { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .portfolio-actions button { padding: 9px 10px; font-size: 11px; }
+  #btn-wallet-withdraw { grid-column: 1 / -1; }
   .portfolio-insights, .sync-summary { padding: 14px 16px; }
   .portfolio-tools { gap: 10px; }
   .portfolio-tools > details:not([open]) > summary { align-items: flex-start; }
