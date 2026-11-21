@@ -7,6 +7,7 @@ import {
   UpsertAssetSchema,
   AssetTypeSchema,
   getUnifiedPortfolio,
+  listWithdrawalAssets,
   setCostBasis,
   deleteCostBasis,
 } from '../services/portfolioService.js';
@@ -53,6 +54,8 @@ export function registerPortfolioRoutes(app: FastifyInstance, db: Database.Datab
       return reply.code(err.statusCode ?? 400).send({ error: err.message ?? 'Pencairan gagal disimpan' });
     }
   });
+
+  app.get('/api/portfolio/withdrawal-assets', async () => listWithdrawalAssets(db));
 
   app.delete('/api/portfolio/:symbol', async (req: FastifyRequest<{ Params: { symbol: string } }>, reply) => {
     try {

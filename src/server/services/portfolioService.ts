@@ -131,8 +131,8 @@ const AssetQty = Decimal.clone({ precision: 80 });
 export function withdrawAssetUnits(db: Database.Database, symbol: string, units: string): WithdrawnAsset {
   const asset = getAssetBySymbol(db, symbol);
   if (!asset) throw Object.assign(new Error('Aset tidak ditemukan'), { statusCode: 404 });
-  if (asset.type === 'saham' || asset.superseded_by_wallet) {
-    throw Object.assign(new Error('Pencairan unit tersedia untuk crypto dan reksadana yang dicatat manual'), { statusCode: 400 });
+  if (asset.type === 'crypto' && matchesWallet(asset, getWalletIndex(db))) {
+    throw Object.assign(new Error('Aset ini tersinkron dari wallet. Pilih aset wallet untuk mencatat pencairan.'), { statusCode: 400 });
   }
   const sold = new AssetQty(units);
   const held = new AssetQty(asset.qty);
@@ -442,6 +442,27 @@ export interface WalletIndex {
   byMint: Map<string, WalletMatch>;
 }
 
+function matchesWallet(asset: Pick<Asset, 'symbol' | 'chain' | 'mint'>, index: WalletIndex): boolean {
+  if (asset.mint && index.byMint.has(asset.mint)) return true;
+  const match = index.bySymbol.get(asset.symbol.toUpperCase());
+  return !!match && (!asset.chain || match.chains.includes(asset.chain));
+}
+
+export function listWithdrawalAssets(db: Database.Database) {
+  const index = getWalletIndex(db);
+  const manual = listAssets(db)
+    .filter((a) => !a.symbol.startsWith('LP-') && parseQty(a.qty).gt(0)
+      && (a.type !== 'crypto' || !matchesWallet(a, index)))
+    .map(({ symbol, name, type, qty }) => ({ source: 'manual' as const, key: symbol, symbol, name, type, qty }));
+  const wallet = getWalletTokens(db).tokens
+    .filter((w) => parseQty(w.amount).gt(0))
+    .map((w) => ({
+      source: 'wallet' as const, key: w.asset_key ?? w.symbol, symbol: w.symbol, name: w.name,
+      type: 'crypto' as const, chains: w.chains,
+    }));
+  return [...manual, ...wallet];
+}
+
 /** Parse meta JSON tabel wallet_positions dengan aman. */
 function metaJson(raw: string): Record<string, unknown> {
   try {
@@ -491,10 +512,7 @@ export function syncSupersedeFlags(db: Database.Database, index: WalletIndex): v
   const update = db.prepare('UPDATE assets SET superseded_by_wallet = ? WHERE symbol = ?');
   for (const r of rows) {
     if (r.type !== 'crypto') continue;
-    const mintMatch = r.mint ? index.byMint.get(r.mint) : undefined;
-    const symMatch = !mintMatch ? index.bySymbol.get(r.symbol.toUpperCase()) : undefined;
-    const chainOk = !symMatch || !r.chain || symMatch.chains.includes(r.chain);
-    const flag = mintMatch || (symMatch && chainOk) ? 1 : 0;
+    const flag = Number(matchesWallet(r, index));
     if (Number(r.superseded_by_wallet) !== flag) update.run(flag, r.symbol);
   }
 }
@@ -729,11 +747,7 @@ export function getUnifiedPortfolio(db: Database.Database, type?: AssetType, opt
   for (const v of vals) {
     // Duplikat: manual sama dengan posisi wallet (chain + mint/simbol sama) →
     // disembunyikan total (tanpa badge/tombol Hapus/teks "dikecualikan").
-    const mintMatch = v.type === 'crypto' && v.mint ? index.byMint.get(v.mint) : undefined;
-    const symMatch = !mintMatch && v.type === 'crypto' ? index.bySymbol.get(v.symbol.toUpperCase()) : undefined;
-    const chainOk = !symMatch || !v.chain || symMatch.chains.includes(v.chain);
-    const superseded = v.type === 'crypto' && !!(mintMatch || (symMatch && chainOk));
-    if (superseded) continue;
+    if (v.type === 'crypto' && matchesWallet(v, index)) continue;
     // Filter token: wajib ada harga; crypto bernilai ≥ $1 (LP legacy dikecualikan).
     const isLp = v.symbol.startsWith('LP-');
     if (v.current_price_idr === null) {

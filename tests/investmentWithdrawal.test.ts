@@ -36,6 +36,7 @@ describe('investment withdrawal and account corrections', () => {
   it.each([
     { type: 'reksadana', symbol: 'RD66', qty: '125.25', sold: '25.05', remaining: '100.2', cost: 100_000, remainingCost: 80_000 },
     { type: 'crypto', symbol: 'SOL', qty: '0.34567890123456789', sold: '0.34567890123456789', remaining: '0', cost: null, remainingCost: null },
+    { type: 'saham', symbol: 'BBCA.JK', qty: '500', sold: '100', remaining: '400', cost: 5_000_000, remainingCost: 4_000_000 },
   ] as const)('books a $type withdrawal, moves it to another bank, and reverses it', async (asset) => {
     upsertAsset(db, { ...asset, name: '', avg_buy_price_idr: 10_000, total_cost_idr: asset.cost });
     const response = await withdraw({
@@ -60,6 +61,28 @@ describe('investment withdrawal and account corrections', () => {
     expect((await app.inject({ method: 'DELETE', url })).statusCode).toBe(200);
     expect(balance(otherBank)).toBe(0);
     expect(getAssetBySymbol(db, asset.symbol)).toMatchObject({ qty: asset.qty, total_cost_idr: asset.cost });
+  });
+
+  it('offers held assets by type even without manual prices and groups synced crypto as wallet', async () => {
+    upsertAsset(db, { type: 'saham', symbol: 'BBCA.JK', name: 'BCA', qty: '500', avg_buy_price_idr: 10_000 });
+    upsertAsset(db, { type: 'reksadana', symbol: 'RD66', name: 'Reksadana uji', qty: '120', avg_buy_price_idr: 0 });
+    upsertAsset(db, { type: 'crypto', symbol: 'BTC', name: 'Bitcoin', qty: '0.01', avg_buy_price_idr: 0 });
+    upsertAsset(db, { type: 'crypto', symbol: 'SOL', name: 'Solana', qty: '1', avg_buy_price_idr: 0 });
+    upsertAsset(db, { type: 'saham', symbol: 'TLKM.JK', name: 'Telkom', qty: '0', avg_buy_price_idr: 0 });
+    const wallet = db.prepare("INSERT INTO wallets (label, address, network_type) VALUES ('Wallet uji', 'fixture', 'solana')").run();
+    db.prepare(`INSERT INTO wallet_positions (wallet_id, chain_id, kind, symbol, name, amount, value_usd)
+      VALUES (?, 'solana', 'token', 'SOL', 'Solana', '1', 100)`).run(wallet.lastInsertRowid);
+
+    const choices = await app.inject({ method: 'GET', url: '/api/portfolio/withdrawal-assets' });
+    expect(choices.statusCode).toBe(200);
+    expect(choices.json()).toEqual([
+      { type: 'crypto', source: 'manual', key: 'BTC', symbol: 'BTC', name: 'Bitcoin', qty: '0.01' },
+      { type: 'reksadana', source: 'manual', key: 'RD66', symbol: 'RD66', name: 'Reksadana uji', qty: '120' },
+      { type: 'saham', source: 'manual', key: 'BBCA.JK', symbol: 'BBCA.JK', name: 'BCA', qty: '500' },
+      { type: 'crypto', source: 'wallet', key: 'SOL', symbol: 'SOL', name: 'Solana', chains: ['solana'] },
+    ]);
+    expect((await withdraw({ source: 'manual', symbol: 'SOL', qty: '1', amount_idr: 10_000, account_id: bank })).statusCode).toBe(400);
+    expect(balance(bank)).toBe(50_000);
   });
 
   it('rolls back a failed withdrawal and records wallet proceeds without reducing manual units', async () => {

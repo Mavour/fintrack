@@ -278,7 +278,7 @@ export async function renderPortfolio(el: HTMLElement, background = false): Prom
   const buttons =
     `<button class="btn-primary" id="btn-add">+ Tambah Aset</button>
      <button class="btn-ghost" id="btn-sync">Perbarui Harga</button>
-     <button class="btn-ghost" id="btn-wallet-withdraw">Catat Pencairan Wallet</button>`;
+     <button class="btn-ghost" id="btn-withdraw">Withdraw</button>`;
   const analysis = shown.some(withBuyPrice)
     ? `<div class="card"><strong>Analisis Keuntungan</strong>
       <div class="between" style="margin-top:10px"><span class="muted">Laba mengambang</span><strong class="${data.floating_pl_idr >= 0 ? 'pos' : 'neg'}">${show(data.floating_pl_idr)}</strong></div>
@@ -407,7 +407,7 @@ export async function renderPortfolio(el: HTMLElement, background = false): Prom
     renderPortfolio(el);
   };
   document.getElementById('btn-add')!.onclick = () => openAssetForm(el);
-  document.getElementById('btn-wallet-withdraw')!.onclick = () => openWithdrawalForm(el);
+  document.getElementById('btn-withdraw')!.onclick = () => openWithdrawalForm(el);
   bindRowEdit(el);
   bindTrendHover(el);
 }
@@ -522,7 +522,7 @@ function bindRowEdit(el: HTMLElement): void {
     const open = (e: Event) => {
       if ((e.target as HTMLElement).closest('[data-cost-btn],button,a')) return;
       const sym = (row as HTMLElement).getAttribute('data-cost')!;
-      openAssetDetail(el, sym);
+      openAssetDetail(el, sym, 'wallet');
     };
     (row as HTMLElement).style.cursor = 'pointer';
     (row as HTMLElement).onclick = open as EventListener;
@@ -533,7 +533,7 @@ function bindRowEdit(el: HTMLElement): void {
   el.querySelectorAll('button[data-cost]').forEach((b) => {
     (b as HTMLElement).onclick = (e) => {
       e.stopPropagation();
-      openAssetDetail(el, (b as HTMLElement).dataset.cost!);
+      openAssetDetail(el, (b as HTMLElement).dataset.cost!, 'wallet');
     };
   });
   // mobile cards rendered? (desktop has none, but safe)
@@ -558,16 +558,16 @@ function bindRowEdit(el: HTMLElement): void {
   el.querySelectorAll('.asset-card[data-cost]').forEach((c) => {
     (c as HTMLElement).onclick = (e) => {
       if ((e.target as HTMLElement).closest('button,a')) return;
-      openAssetDetail(el, (c as HTMLElement).dataset.cost!);
+      openAssetDetail(el, (c as HTMLElement).dataset.cost!, 'wallet');
     };
   });
 }
 
 /** Detail aset: klik baris/kartu selalu mendarat di sini dulu.
  *  Manual → info lengkap + tombol Ubah; wallet → info + tombol isi harga beli. */
-function openAssetDetail(el: HTMLElement, symbol: string): void {
+function openAssetDetail(el: HTMLElement, symbol: string, source: 'manual' | 'wallet' = 'manual'): void {
   const symU = symbol.toUpperCase();
-  const manual = data_assets.find((a) => a.symbol.toUpperCase() === symU);
+  const manual = source === 'manual' ? data_assets.find((a) => a.symbol.toUpperCase() === symU) : undefined;
   const wallet = data_wallets.find((w) => w.asset_key === symbol) ?? data_wallets.find((w) => w.symbol.toUpperCase() === symU);
   const kv = (k: string, v: string): string =>
     `<div class="between" style="margin-top:6px"><span class="muted">${k}</span><strong style="text-align:right">${v}</strong></div>`;
@@ -592,7 +592,7 @@ function openAssetDetail(el: HTMLElement, symbol: string): void {
       ${kv('Diperbarui', a.price_fetched_at ? timeAgo(a.price_fetched_at) : '—')}
       ${a.is_stale ? '<div class="muted" style="margin-top:4px">Harga basi — coba Perbarui Harga.</div>' : ''}
       <button class="btn-primary" id="d-edit">Ubah aset</button>
-      ${(isCrypto || a.type === 'reksadana') && Number(a.qty) > 0 ? '<button class="btn-ghost" id="d-withdraw" style="width:100%;margin-top:8px">Catat pencairan</button>' : ''}`);
+      ${Number(a.qty) > 0 ? '<button class="btn-ghost" id="d-withdraw" style="width:100%;margin-top:8px">Withdraw</button>' : ''}`);
     (body.querySelector('#d-edit') as HTMLButtonElement).onclick = () => {
       close();
       openAssetForm(el, a.symbol);
@@ -621,11 +621,17 @@ function openAssetDetail(el: HTMLElement, symbol: string): void {
       ${kv('Harga beli (input manual)', cost != null ? show(cost) : '—')}
       ${kv('P/L', pl)}
       <p class="muted" style="margin-bottom:0">Posisi wallet read-only — tidak bisa diubah/hapus dari sini. P/L dihitung dari harga beli yang Anda isi.</p>
-      ${w.asset_key ? '<p class="muted">Harga beli per kontrak belum tersedia; P/L tidak dihitung dari ticker yang sama.</p>' : `<button class="btn-primary" id="d-cost">${cost != null ? 'Ubah harga beli' : 'Isi harga beli'}</button>`}`);
+      ${w.asset_key ? '<p class="muted">Harga beli per kontrak belum tersedia; P/L tidak dihitung dari ticker yang sama.</p>' : `<button class="btn-primary" id="d-cost">${cost != null ? 'Ubah harga beli' : 'Isi harga beli'}</button>`}
+      ${Number(w.amount) > 0 ? '<button class="btn-ghost" id="d-withdraw" style="width:100%;margin-top:8px">Withdraw</button>' : ''}`);
     const costButton = body.querySelector('#d-cost') as HTMLButtonElement | null;
     if (costButton) costButton.onclick = () => {
       close();
       openCostForm(el, w.symbol);
+    };
+    const withdrawButton = body.querySelector<HTMLButtonElement>('#d-withdraw');
+    if (withdrawButton) withdrawButton.onclick = () => {
+      close();
+      openWithdrawalForm(el, w);
     };
     return;
   }
@@ -634,48 +640,105 @@ function openAssetDetail(el: HTMLElement, symbol: string): void {
   else openAssetForm(el, symbol);
 }
 
-function openWithdrawalForm(el: HTMLElement, asset?: AssetV): void {
-  const { close, el: body } = openModal(asset ? `Pencairan ${asset.symbol}` : 'Pencairan Crypto dari Wallet', `
+type WithdrawalAsset = { key: string; symbol: string; name: string; type: string } & (
+  { source: 'manual'; qty: string } | { source: 'wallet'; chains: string[] }
+);
+
+function openWithdrawalForm(el: HTMLElement, initial?: AssetV | WalletTokenV): void {
+  const { close, el: body } = openModal('Withdraw', `
     <form id="withdraw-form">
-      <p class="muted" style="margin-top:0">${asset
-        ? 'Isi jumlah unit yang sudah dijual dan rupiah bersih yang diterima.'
-        : 'Catat rupiah yang sudah masuk ke bank. Jumlah token diperbarui lewat sinkronisasi wallet.'}</p>
-      ${asset
-        ? `<label for="w-qty">Jumlah unit yang dicairkan</label><input id="w-qty" inputmode="decimal" maxlength="40" placeholder="Tersedia ${escAttr(asset.qty)}" required />`
-        : '<label for="w-symbol">Simbol crypto</label><input id="w-symbol" maxlength="40" placeholder="Contoh: SOL" required />'}
+      <label for="w-type">Jenis aset</label><select id="w-type" required disabled><option value="">Memuat jenis aset…</option></select>
+      <label for="w-asset">Aset</label><select id="w-asset" required disabled><option value="">Pilih jenis aset dulu</option></select>
+      <div id="w-units" hidden>
+        <label for="w-qty">Jumlah yang dicairkan</label><input id="w-qty" inputmode="decimal" maxlength="40" required disabled />
+      </div>
+      <p class="muted" id="w-wallet" hidden>Jumlah token mengikuti sinkronisasi wallet.</p>
       <label for="w-amount">Rupiah bersih yang diterima</label><input id="w-amount" type="number" min="1" step="1" inputmode="numeric" required />
       <label for="w-bank">Rekening tujuan</label><select id="w-bank" required disabled><option value="">Memuat rekening…</option></select>
       <label for="f-date">Tanggal &amp; waktu (WITA)</label><input id="f-date" type="datetime-local" />
       <label for="w-note">Catatan (opsional)</label><input id="w-note" maxlength="500" />
       <p class="muted" id="w-status" role="status" hidden></p>
-      <button type="submit" class="btn-primary" id="w-save" disabled>Simpan pencairan</button>
+      <button type="submit" class="btn-primary" id="w-save" disabled>Withdraw</button>
     </form>`);
   const form = body.querySelector<HTMLFormElement>('#withdraw-form')!;
+  const type = form.querySelector<HTMLSelectElement>('#w-type')!;
+  const asset = form.querySelector<HTMLSelectElement>('#w-asset')!;
+  const units = form.querySelector<HTMLElement>('#w-units')!;
+  const qty = form.querySelector<HTMLInputElement>('#w-qty')!;
+  const walletHint = form.querySelector<HTMLElement>('#w-wallet')!;
   const bank = form.querySelector<HTMLSelectElement>('#w-bank')!;
   const save = form.querySelector<HTMLButtonElement>('#w-save')!;
   const status = form.querySelector<HTMLElement>('#w-status')!;
+  let assets: WithdrawalAsset[] = [];
+  let submitting = false;
+  const assetKey = (a: WithdrawalAsset) => `${a.source}:${a.key}`;
+  const selectedAsset = () => assets.find((a) => assetKey(a) === asset.value);
+  const updateSave = () => { save.disabled = submitting || !selectedAsset() || !bank.value; };
+  const updateAsset = () => {
+    const selected = selectedAsset();
+    const manual = selected?.source === 'manual' ? selected : undefined;
+    units.hidden = qty.disabled = !manual;
+    qty.value = '';
+    qty.placeholder = manual ? `Tersedia ${manual.qty}` : '';
+    walletHint.hidden = selected?.source !== 'wallet';
+    updateSave();
+  };
+  const updateChoices = (selected = '') => {
+    const choices = assets.filter((a) => a.type === type.value);
+    asset.replaceChildren(new Option(type.value ? 'Pilih aset' : 'Pilih jenis aset dulu', ''));
+    for (const a of choices) {
+      const label = [a.symbol, a.name && a.name !== a.symbol ? a.name : ''];
+      if (a.source === 'wallet') {
+        label.push(`Wallet (${a.chains.join(', ')})`);
+        if (a.key !== a.symbol) label.push(`…${a.key.slice(-6)}`);
+      }
+      asset.add(new Option(label.filter(Boolean).join(' • '), assetKey(a)));
+    }
+    asset.disabled = !choices.length;
+    if (choices.some((a) => assetKey(a) === selected)) asset.value = selected;
+    updateAsset();
+  };
   const input = (id: string) => form.querySelector<HTMLInputElement>(id)!.value.trim();
   const showError = (message: string) => {
     status.textContent = message;
     status.hidden = false;
   };
-  void api.get('/api/accounts').then((data) => {
-    const banks = (data as TxAccountRef[]).filter((a) => a.type === 'bank' && a.is_active);
+  type.onchange = () => updateChoices();
+  asset.onchange = updateAsset;
+  bank.onchange = updateSave;
+  void Promise.all([api.get('/api/portfolio/withdrawal-assets'), api.get('/api/accounts')]).then(([assetData, accountData]) => {
+    assets = (assetData as WithdrawalAsset[]).sort((a, b) => a.symbol.localeCompare(b.symbol));
+    type.replaceChildren(new Option(assets.length ? 'Pilih jenis aset' : 'Belum ada aset yang bisa dicairkan', ''));
+    for (const [key, label] of TYPE_META) {
+      if (assets.some((a) => a.type === key)) type.add(new Option(label, key));
+    }
+    type.disabled = !assets.length;
+    const banks = (accountData as TxAccountRef[]).filter((a) => a.type === 'bank' && a.is_active);
     bank.innerHTML = `<option value="">${banks.length ? 'Pilih rekening' : 'Belum ada rekening bank aktif'}</option>`
       + banks.map((a) => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('');
-    if (banks.length) bank.disabled = save.disabled = false;
-  }).catch((err: Error) => showError(err.message));
+    bank.disabled = !banks.length;
+    const initialKey = initial?.source === 'wallet' ? initial.asset_key ?? initial.symbol : initial?.symbol;
+    const preselected = assets.find((a) => a.source === initial?.source && a.key === initialKey);
+    if (preselected) type.value = preselected.type;
+    updateChoices(preselected ? assetKey(preselected) : '');
+  }).catch((err: Error) => {
+    type.replaceChildren(new Option('Gagal memuat aset', ''));
+    bank.replaceChildren(new Option('Rekening belum tersedia', ''));
+    showError(err.message);
+  });
   form.onsubmit = async (e) => {
     e.preventDefault();
-    if (save.disabled) return;
-    save.disabled = true;
+    const selected = selectedAsset();
+    if (save.disabled || !selected) return;
+    submitting = true;
+    updateSave();
     save.classList.add('btn-loading');
     status.hidden = true;
     try {
       await api.post('/api/portfolio/withdrawals', {
-        source: asset ? 'manual' : 'wallet',
-        symbol: asset?.symbol ?? input('#w-symbol'),
-        ...(asset ? { qty: input('#w-qty').replace(',', '.') } : {}),
+        source: selected.source,
+        symbol: selected.symbol,
+        ...(selected.source === 'manual' ? { qty: qty.value.trim().replace(',', '.') } : {}),
         amount_idr: Number(input('#w-amount')),
         account_id: Number(bank.value),
         note: input('#w-note'),
@@ -683,7 +746,8 @@ function openWithdrawalForm(el: HTMLElement, asset?: AssetV): void {
       });
     } catch (err) {
       showError((err as Error).message);
-      save.disabled = false;
+      submitting = false;
+      updateSave();
       save.classList.remove('btn-loading');
       return;
     }
