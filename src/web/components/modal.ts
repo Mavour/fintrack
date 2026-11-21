@@ -177,6 +177,11 @@ const KIND_LABEL: Record<string, string> = {
   investment_withdrawal: 'Pencairan Investasi',
 };
 
+export function occurredAtField(value?: string | null): string {
+  return `<label for="f-date">Tanggal &amp; waktu (WITA)</label><input id="f-date" type="datetime-local" value="${value ? toWitaInput(value) : ''}" aria-describedby="f-date-hint" />
+    <div class="muted" id="f-date-hint" style="margin-top:-6px">Kosongkan untuk memakai tanggal dan waktu saat disimpan.</div>`;
+}
+
 /** Baca input tanggal-waktu dari body form. Kosong = waktu sekarang. */
 export function readOccurredAt(body: HTMLElement): string {
   const el = body.querySelector('#f-date') as HTMLInputElement | null;
@@ -256,8 +261,7 @@ export function txForm(accounts: TxAccountRef[], kind = 'expense', init?: TxForm
         </div>
       </div>
     </div><div class="muted" id="f-cat-status" role="status"></div>`,
-    `<label for="f-date">Tanggal &amp; waktu (WITA)</label><input id="f-date" type="datetime-local" value="${init?.occurred_at ? toWitaInput(init.occurred_at) : ''}" />
-    <div class="muted" style="margin-top:-6px">Kosongkan = waktu sekarang.</div>`,
+    occurredAtField(init?.occurred_at),
     `<label for="f-note">Catatan</label><input id="f-note" value="${escAttr(init?.note ?? '')}" placeholder="cth. Kopi" />`,
     `<button class="btn-primary" id="f-save">Simpan</button>`,
   );

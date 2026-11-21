@@ -7,7 +7,7 @@ import { coinAvatar } from '../lib/coinIcons.js';
 import { wealthTrendCard } from '../lib/trend.js';
 import { bindTrendHover } from '../components/trendline.js';
 import { donut } from '../components/donut.js';
-import { openModal, readOccurredAt, type TxAccountRef } from '../components/modal.js';
+import { occurredAtField, openModal, readOccurredAt, type TxAccountRef } from '../components/modal.js';
 import { invalidateTxCache } from './transactions.js';
 import { isDesktop, isPrivat } from '../lib/state.js';
 import { chainBadge, walletChip, walletUrl } from '../lib/chains.js';
@@ -655,7 +655,7 @@ function openWithdrawalForm(el: HTMLElement, initial?: AssetV | WalletTokenV): v
       <p class="muted" id="w-wallet" hidden>Jumlah token mengikuti sinkronisasi wallet.</p>
       <label for="w-amount">Rupiah bersih yang diterima</label><input id="w-amount" type="number" min="1" step="1" inputmode="numeric" required />
       <label for="w-bank">Rekening tujuan</label><select id="w-bank" required disabled><option value="">Memuat rekening…</option></select>
-      <label for="f-date">Tanggal &amp; waktu (WITA)</label><input id="f-date" type="datetime-local" />
+      ${occurredAtField()}
       <label for="w-note">Catatan (opsional)</label><input id="w-note" maxlength="500" />
       <p class="muted" id="w-status" role="status" hidden></p>
       <button type="submit" class="btn-primary" id="w-save" disabled>Withdraw</button>

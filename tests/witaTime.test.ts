@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import { toWitaInput, fromWitaInput, witaMonth } from '../src/shared/time.js';
 import { fmtDate, fmtTransactionDate, todayLong } from '../src/web/lib/format.js';
-import { readOccurredAt, txForm } from '../src/web/components/modal.js';
+import { occurredAtField, readOccurredAt, txForm } from '../src/web/components/modal.js';
 import { createAccount } from '../src/server/services/accountService.js';
 import { createTransaction, listTransactions } from '../src/server/services/transactionService.js';
 import { getDashboard } from '../src/server/services/dashboardService.js';
@@ -38,6 +38,16 @@ describe('WITA transaction times', () => {
     expect(form).toContain('value="2026-11-15T10:44"');
     const body = { querySelector: () => ({ value: '2026-11-15T10:44' }) } as unknown as HTMLElement;
     expect(readOccurredAt(body)).toBe('2026-11-15T02:44:00.000Z');
+  });
+
+  it('uses the current WITA day and time when the shared date field is left blank', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-31T16:05:00Z'));
+    expect(occurredAtField()).toContain('type="datetime-local" value=""');
+    const body = { querySelector: () => ({ value: '' }) } as unknown as HTMLElement;
+    const saved = readOccurredAt(body);
+    expect(saved).toBe('2026-10-31T16:05:00.000Z');
+    expect(fmtTransactionDate(saved)).toBe('1 Nov 2026 • 00:05 WITA');
   });
 
   it('uses the WITA month for transaction filters and dashboard totals at month boundaries', () => {

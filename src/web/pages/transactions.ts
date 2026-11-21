@@ -1,6 +1,6 @@
 import { api } from '../lib/api.js';
-import { formatIdr, fmtTransactionDate } from '../lib/format.js';
-import { witaMonth } from '../../shared/time.js';
+import { formatIdr, formatCompactIdr, fmtTransactionDate } from '../lib/format.js';
+import { parseTimestamp, toWitaInput, witaMonth } from '../../shared/time.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal, txForm, wireCatOptions, wireTxAccounts, readOccurredAt, type TxFormInit, type TxAccountRef } from '../components/modal.js';
 import { isDesktop } from '../lib/state.js';
@@ -17,190 +17,277 @@ let sortKey: 'date' | 'amount' = 'date';
 let sortDir: 1 | -1 = -1;
 let fSearch = '';
 let fMonth = '';
-let fMonthDefaulted = false;
 let fCat = '';
 let fAcc = '';
-/** Halaman dimuat bertahap via offset; cache dipakai agar filter tidak refetch. */
-let txCache: Tx[] | null = null;
-let txExhausted = false;
+let selectedDay = '';
+let monthCache: { month: string; rows: Promise<Tx[]> } | null = null;
 const PAGE = 200;
-
-function resetCache(): void {
-  txCache = null;
-  txExhausted = false;
-}
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+const monthFormat = new Intl.DateTimeFormat('id-ID', { timeZone: 'UTC', month: 'long', year: 'numeric' });
+const dayFormat = new Intl.DateTimeFormat('id-ID', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const weekdays = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 
 /** Dipanggil dari luar (mis. quick action di main) setelah transaksi dibuat agar cache tidak basi. */
 export function invalidateTxCache(): void {
-  resetCache();
+  monthCache = null;
 }
 
-/** Ambil satu halaman berikutnya (default bulan dipakai server-side). */
-async function loadPage(append: boolean): Promise<void> {
-  const offset = append && txCache ? txCache.length : 0;
-  const month = fMonth ? `&month=${fMonth}` : '';
-  const page = (await api.get(`/api/transactions?limit=${PAGE}&offset=${offset}${month}`)) as Tx[];
-  if (!txCache) txCache = [];
-  txCache.push(...page);
-  if (page.length < PAGE) txExhausted = true;
+async function fetchMonth(month: string): Promise<Tx[]> {
+  const rows: Tx[] = [];
+  // Include all pages before publishing daily amounts.
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await api.get(`/api/transactions?limit=${PAGE}&offset=${offset}&month=${month}`) as Tx[];
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+}
+
+function loadMonth(month: string): Promise<Tx[]> {
+  if (monthCache?.month === month) return monthCache.rows;
+  const rows = fetchMonth(month).catch((err) => {
+    if (monthCache?.rows === rows) invalidateTxCache();
+    throw err;
+  });
+  monthCache = { month, rows };
+  return rows;
+}
+
+function calendarDate(day: string): Date {
+  return new Date(`${day}T00:00:00Z`);
+}
+
+function adjacentMonth(month: string, direction: number): string {
+  const date = calendarDate(`${month}-01`);
+  date.setUTCMonth(date.getUTCMonth() + direction);
+  return date.toISOString().slice(0, 7);
+}
+
+function cashflow(rows: Tx[]): { income: number; expense: number } {
+  let income = 0;
+  let expense = 0;
+  for (const row of rows) {
+    if (row.kind === 'expense') expense += row.amount_idr;
+    if (row.kind === 'income' && !row.investment_symbol) income += row.amount_idr;
+  }
+  return { income, expense };
+}
+
+function flowClass(net: number): string {
+  return net < 0 ? 'neg' : net > 0 ? 'pos' : '';
+}
+
+function totals(rows: Tx[]): string {
+  const { income, expense } = cashflow(rows);
+  return `<dl class="tx-totals">
+    <div><dt>Pemasukan</dt><dd class="pos">${formatIdr(income)}</dd></div>
+    <div><dt>Pengeluaran</dt><dd class="neg">${formatIdr(expense)}</dd></div>
+    <div><dt>Selisih</dt><dd class="${flowClass(income - expense)}">${formatIdr(income - expense)}</dd></div>
+  </dl>`;
+}
+
+function calendar(month: string, groups: Map<string, Tx[]>): string {
+  const start = calendarDate(`${month}-01`);
+  const leading = (start.getUTCDay() + 6) % 7;
+  const end = new Date(start);
+  end.setUTCMonth(end.getUTCMonth() + 1, 0);
+  const today = toWitaInput(new Date().toISOString()).slice(0, 10);
+  const gaps = (count: number) => '<span class="tx-day-gap" aria-hidden="true"></span>'.repeat(count);
+  const cells = Array.from({ length: end.getUTCDate() }, (_, i) => {
+    const day = `${month}-${String(i + 1).padStart(2, '0')}`;
+    const dayRows = groups.get(day) ?? [];
+    const { income, expense } = cashflow(dayRows);
+    const net = income - expense;
+    const compact = formatCompactIdr(net).replace(/Rp\s*/, '');
+    const amount = `${net > 0 ? '+' : ''}${compact}`;
+    const description = `${dayFormat.format(calendarDate(day))}, ${dayRows.length} transaksi${dayRows.length ? `, selisih ${formatIdr(net)}` : ''}`;
+    const label = `<span class="tx-day-number">${i + 1}</span>`;
+    const current = day === today ? ' aria-current="date"' : '';
+    if (!dayRows.length) return `<span class="tx-day tx-day-empty" aria-label="${escAttr(description)}"${current}>${label}</span>`;
+    return `<button type="button" class="tx-day" data-day="${day}" aria-controls="tx-day-detail" aria-expanded="${day === selectedDay}"
+      aria-label="${escAttr(description)}" title="${escAttr(description)}"${current}>
+      ${label}<strong class="tx-day-amount ${flowClass(net)}">${amount}</strong>
+      <span class="tx-day-count">${dayRows.length} transaksi</span>
+    </button>`;
+  }).join('');
+  const trailing = (7 - (leading + end.getUTCDate()) % 7) % 7;
+  return `<p class="tx-calendar-caption muted">Selisih harian (Rp). Pilih tanggal untuk melihat transaksi.</p>
+    <div class="tx-calendar" role="group" aria-label="Kalender transaksi ${monthFormat.format(start)}">
+      ${weekdays.map((day) => `<span class="tx-weekday" aria-hidden="true">${day}</span>`).join('')}
+      ${gaps(leading)}${cells}${gaps(trailing)}
+    </div>`;
+}
+
+function matchesFilters(tx: Tx, query: string): boolean {
+  return (!fCat || tx.category === fCat)
+    && (!fAcc || String(tx.account_id) === fAcc || String(tx.to_account_id) === fAcc)
+    && (!query || [tx.note, tx.category, tx.investment_symbol].some((value) => value?.toLowerCase().includes(query)));
+}
+
+function refreshAfterSave(el: HTMLElement, tx: Tx): void {
+  invalidateTxCache();
+  if (location.hash.split('?')[0] !== '#/transaksi') return;
+  selectedDay = toWitaInput(tx.occurred_at).slice(0, 10);
+  fMonth = selectedDay.slice(0, 7) || witaMonth();
+  void renderTransactions(el);
 }
 
 export async function renderTransactions(el: HTMLElement): Promise<void> {
-  if (!el.innerHTML.trim()) el.innerHTML = `<div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>`;
-  const accounts = (await api.get('/api/accounts')) as AccountRef[];
-  if (!fMonthDefaulted) {
-    fMonth = witaMonth();
-    fMonthDefaulted = true;
+  const month = fMonth ||= witaMonth();
+  el.innerHTML = `<section class="card tx-calendar-card" aria-labelledby="tx-calendar-title">
+    <h2 id="tx-calendar-title">Kalender Transaksi</h2>
+    <div class="toolbar tx-filters" role="search">
+      <input type="search" id="t-search" placeholder="Cari catatan / kategori…" value="${escAttr(fSearch)}" aria-label="Cari transaksi" disabled />
+      <select id="t-cat" aria-label="Filter kategori" disabled><option value="">Semua kategori</option></select>
+      <select id="t-acc" aria-label="Filter akun" disabled><option value="">Semua akun</option></select>
+    </div>
+    <div class="tx-month-controls">
+      <button type="button" class="btn-ghost icon-btn" id="tx-prev" aria-label="Bulan sebelumnya"${month === '0001-01' ? ' disabled' : ''}>‹</button>
+      <input type="month" id="t-month" value="${month}" min="0001-01" max="9999-12" aria-label="Pilih bulan" />
+      <button type="button" class="btn-ghost icon-btn" id="tx-next" aria-label="Bulan berikutnya"${month === '9999-12' ? ' disabled' : ''}>›</button>
+    </div>
+    <div id="tx-month-content" aria-busy="true"><p class="muted" role="status">Memuat transaksi…</p></div>
+  </section>
+  <section class="card tx-day-detail" id="tx-day-detail" aria-labelledby="tx-day-heading" hidden></section>`;
+
+  const content = el.querySelector<HTMLElement>('#tx-month-content')!;
+  const detail = el.querySelector<HTMLElement>('#tx-day-detail')!;
+  const current = () => content.isConnected && location.hash.split('?')[0] === '#/transaksi';
+  const monthInput = el.querySelector<HTMLInputElement>('#t-month')!;
+  const changeMonth = (next: string, focusId: string) => {
+    if (!MONTH_PATTERN.test(next) || next.startsWith('0000-') || next === month) {
+      monthInput.value = month;
+      return;
+    }
+    fMonth = next;
+    selectedDay = '';
+    void renderTransactions(el);
+    el.querySelector<HTMLElement>(`#${focusId}`)?.focus({ preventScroll: true });
+  };
+  el.querySelector<HTMLButtonElement>('#tx-prev')!.onclick = () => changeMonth(adjacentMonth(month, -1), 'tx-prev');
+  el.querySelector<HTMLButtonElement>('#tx-next')!.onclick = () => changeMonth(adjacentMonth(month, 1), 'tx-next');
+  monthInput.onchange = () => changeMonth(monthInput.value || witaMonth(), 't-month');
+
+  let txs: Tx[];
+  let accounts: AccountRef[];
+  try {
+    [txs, accounts] = await Promise.all([loadMonth(month), api.get('/api/accounts') as Promise<AccountRef[]>]);
+  } catch (err) {
+    if (!current()) return;
+    content.setAttribute('aria-busy', 'false');
+    content.innerHTML = `<div class="empty" role="status"><p>${escHtml((err as Error).message)}</p><button class="btn-ghost">Coba lagi</button></div>`;
+    content.querySelector('button')!.onclick = () => void renderTransactions(el);
+    return;
   }
-  if (!txCache) await loadPage(false);
-  const txs = txCache!;
+  if (!current()) return;
+  content.setAttribute('aria-busy', 'false');
+
   const accName = new Map(accounts.map((a) => [a.id, a.name]));
+  const search = el.querySelector<HTMLInputElement>('#t-search')!;
+  const categories = el.querySelector<HTMLSelectElement>('#t-cat')!;
+  const accountFilter = el.querySelector<HTMLSelectElement>('#t-acc')!;
   const cats = [...new Set(txs.map((t) => t.category))].sort();
+  if (fCat && !cats.includes(fCat)) fCat = '';
+  for (const category of cats) categories.add(new Option(category, category));
+  for (const account of accounts) accountFilter.add(new Option(account.name, String(account.id)));
+  search.disabled = categories.disabled = accountFilter.disabled = false;
+  categories.value = fCat;
+  accountFilter.value = fAcc;
+  fAcc = accountFilter.value;
 
-  const filtered = txs
-    .filter((t) => (fMonth ? witaMonth(t.occurred_at) === fMonth : true))
-    .filter((t) => (fCat ? t.category === fCat : true))
-    .filter((t) => !fAcc || String(t.account_id) === fAcc || String(t.to_account_id) === fAcc)
-    .filter((t) => {
-      const q = fSearch.trim().toLowerCase();
-      return !q || t.note.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)
-        || t.investment_symbol?.toLowerCase().includes(q);
-    })
-    .sort((a, b) =>
-      sortKey === 'date'
-        ? (a.occurred_at < b.occurred_at ? -1 : 1) * sortDir
-        : (a.amount_idr - b.amount_idr) * sortDir,
-    );
-
-  const more =
-    txExhausted || txs.length === 0
-      ? ''
-      : `<div style="text-align:center;margin-top:12px"><button class="btn-ghost" id="btn-more">Muat lebih banyak</button></div>`;
-
-  const toolbar = `
-    <div class="toolbar" role="search">
-      <input type="search" id="t-search" placeholder="Cari catatan / kategori…" value="${escAttr(fSearch)}" aria-label="Cari transaksi" />
-      <input type="month" id="t-month" value="${escAttr(fMonth)}" aria-label="Filter bulan" />
-      <select id="t-cat" aria-label="Filter kategori"><option value="">Semua kategori</option>${cats.map((c) => `<option ${fCat === c ? 'selected' : ''}>${escHtml(c)}</option>`).join('')}</select>
-      <select id="t-acc" aria-label="Filter akun"><option value="">Semua akun</option>${accounts.map((a) => `<option value="${a.id}" ${fAcc === String(a.id) ? 'selected' : ''}>${escHtml(a.name)}</option>`).join('')}</select>
-    </div>`;
-
-  if (isDesktop()) {
-    el.innerHTML = `
-      <div class="card">
-        <div class="between"><strong>Riwayat Transaksi</strong><button class="btn-primary" id="btn-new">+ Catat</button></div>
-        <div style="margin-top:12px">${toolbar}</div>
-        <div class="tbl-wrap">${txTable(filtered, accName)}</div>
-        ${more}
-      </div>`;
-  } else {
-    el.innerHTML = `
-      <div class="card"><div class="between"><strong>Transaksi</strong><button class="btn-primary" id="btn-new">+ Catat</button></div></div>
-      <div class="card">${toolbar}</div>
-      <div class="card">${txCards(filtered, accName)}${more}</div>`;
-  }
-
-  const tSearch = document.getElementById('t-search') as HTMLInputElement | null;
-  const tMonth = document.getElementById('t-month') as HTMLInputElement | null;
-  const tCat = document.getElementById('t-cat') as HTMLSelectElement | null;
-  const tAcc = document.getElementById('t-acc') as HTMLSelectElement | null;
-  const rebind = () => {
-    if (tSearch) fSearch = tSearch.value;
-    if (tMonth) fMonth = tMonth.value;
-    fCat = tCat?.value ?? '';
-    fAcc = tAcc?.value ?? '';
+  const groups = new Map<string, Tx[]>();
+  const updateDetail = (focus = false) => {
+    const dayRows = groups.get(selectedDay);
+    detail.hidden = !dayRows;
+    detail.innerHTML = '';
+    for (const button of content.querySelectorAll<HTMLButtonElement>('button[data-day]')) {
+      button.setAttribute('aria-expanded', String(button.dataset.day === selectedDay));
+    }
+    if (!dayRows) return;
+    const sorted = dayRows.slice().sort((a, b) => {
+      const delta = sortKey === 'amount' ? a.amount_idr - b.amount_idr
+        : parseTimestamp(a.occurred_at).getTime() - parseTimestamp(b.occurred_at).getTime();
+      return (delta || a.id - b.id) * sortDir;
+    });
+    detail.innerHTML = `<div class="between"><div>
+      <h2 id="tx-day-heading" tabindex="-1">${dayFormat.format(calendarDate(selectedDay))}</h2>
+      <div class="muted">${dayRows.length} transaksi</div>
+    </div><button class="btn-ghost" data-close-day>Tutup</button></div>
+    ${totals(dayRows)}
+    ${isDesktop() ? `<div class="tbl-wrap">${txTable(sorted, accName)}</div>` : txCards(sorted, accName)}`;
+    if (focus) detail.querySelector<HTMLElement>('#tx-day-heading')!.focus();
   };
-  tSearch?.addEventListener('input', () => {
-    fSearch = tSearch.value;
-    renderTransactions(el);
-    const s = document.getElementById('t-search') as HTMLInputElement | null;
-    s?.focus();
-    if (s) s.setSelectionRange(s.value.length, s.value.length);
-  });
-  if (tMonth) tMonth.onchange = () => {
-    rebind();
-    resetCache();
-    renderTransactions(el);
+  const updateCalendar = () => {
+    groups.clear();
+    const query = fSearch.trim().toLowerCase();
+    const filtered = txs.filter((tx) => {
+      if (!matchesFilters(tx, query)) return false;
+      const day = toWitaInput(tx.occurred_at).slice(0, 10);
+      if (!day.startsWith(month)) return false;
+      const group = groups.get(day);
+      if (group) group.push(tx);
+      else groups.set(day, [tx]);
+      return true;
+    });
+    if (!groups.has(selectedDay)) selectedDay = '';
+    content.innerHTML = totals(filtered) + calendar(month, groups)
+      + (filtered.length ? '' : '<p class="tx-calendar-empty muted" role="status">Tidak ada transaksi yang cocok di bulan ini.</p>');
+    updateDetail();
   };
-  if (tCat) tCat.onchange = () => {
-    rebind();
-    renderTransactions(el);
+  search.oninput = () => { fSearch = search.value; updateCalendar(); };
+  categories.onchange = () => { fCat = categories.value; updateCalendar(); };
+  accountFilter.onchange = () => { fAcc = accountFilter.value; updateCalendar(); };
+  content.onclick = (e) => {
+    const day = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-day]')?.dataset.day;
+    if (!day) return;
+    selectedDay = selectedDay === day ? '' : day;
+    updateDetail(!!selectedDay);
   };
-  if (tAcc) tAcc.onchange = () => {
-    rebind();
-    renderTransactions(el);
-  };
-  el.querySelectorAll('[data-sort]').forEach(
-    (th) => {
-      const activate = () => {
-        const k = (th as HTMLElement).dataset.sort as 'date' | 'amount';
-        if (sortKey === k) sortDir = sortDir === 1 ? -1 : 1;
-        else {
-          sortKey = k;
-          sortDir = -1;
-        }
-        renderTransactions(el);
-      };
-      (th as HTMLElement).onclick = activate;
-      (th as HTMLElement).onkeydown = (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          activate();
-        }
-      };
-    },
-  );
-
-  document.getElementById('btn-new')!.onclick = () => openNew(el, 'expense', accounts);
-  el.querySelectorAll('[data-edit-id]').forEach(
-    (b) => ((b as HTMLElement).onclick = () => {
-      const tx = txs.find((t) => String(t.id) === (b as HTMLElement).dataset.editId)!;
-      openEdit(el, tx, accounts);
-    }),
-  );
-  el.querySelectorAll('[data-del]').forEach(
-    (b) => ((b as HTMLElement).onclick = async () => {
-      const btn = b as HTMLButtonElement;
-      if (btn.disabled || !confirm('Hapus transaksi ini? Saldo akan disesuaikan kembali.')) return;
-      btn.disabled = true;
-      btn.classList.add('btn-loading');
+  detail.onclick = async (e) => {
+    const button = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+    if (!button) return;
+    if (button.hasAttribute('data-close-day')) {
+      const dayButton = content.querySelector<HTMLButtonElement>(`[data-day="${selectedDay}"]`);
+      selectedDay = '';
+      updateDetail();
+      dayButton?.focus();
+    } else if (button.dataset.sort === 'date' || button.dataset.sort === 'amount') {
+      const key = button.dataset.sort;
+      sortDir = sortKey === key && sortDir === -1 ? 1 : -1;
+      sortKey = key;
+      updateDetail();
+      detail.querySelector<HTMLButtonElement>(`[data-sort="${key}"]`)?.focus();
+    } else if (button.dataset.editId) {
+      const tx = groups.get(selectedDay)?.find((row) => row.id === Number(button.dataset.editId));
+      if (tx) openEdit(el, tx, accounts);
+    } else if (button.dataset.del && !button.disabled && confirm('Hapus transaksi ini? Saldo akan disesuaikan kembali.')) {
+      button.disabled = true;
+      button.classList.add('btn-loading');
       try {
-        await api.del(`/api/transactions/${btn.dataset.del}`);
-        resetCache();
-        await renderTransactions(el);
+        await api.del(`/api/transactions/${button.dataset.del}`);
+        invalidateTxCache();
+        if (current()) await renderTransactions(el);
       } catch (err) {
         alert((err as Error).message);
-      } finally {
-        btn.disabled = false;
-        btn.classList.remove('btn-loading');
+        button.disabled = false;
+        button.classList.remove('btn-loading');
       }
-    }),
-  );
-  const moreBtn = document.getElementById('btn-more') as HTMLButtonElement | null;
-  if (moreBtn) {
-    moreBtn.onclick = async () => {
-      if (moreBtn.disabled) return;
-      moreBtn.disabled = true;
-      moreBtn.textContent = 'Memuat…';
-      await loadPage(true);
-      renderTransactions(el);
-    };
-  }
+    }
+  };
+  updateCalendar();
 
-  const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
-  if (q.get('baru')) {
+  const kind = new URLSearchParams(location.hash.split('?')[1] ?? '').get('baru');
+  if (kind) {
     history.replaceState(null, '', '#/transaksi');
-    openNew(el, q.get('baru')!, accounts);
+    openNew(el, kind, accounts);
   }
 }
 
 function txTable(txs: Tx[], accName: Map<number, string>): string {
-  if (txs.length === 0) return '<div class="empty">Tidak ada transaksi yang cocok.</div>';
   const arrow = (k: string) => (sortKey === k ? (sortDir === 1 ? ' ▲' : ' ▼') : '');
   return `<table class="data fixed"><thead><tr>
-    <th class="sortable" data-sort="date" tabindex="0" role="button" aria-label="Urutkan tanggal">Tanggal${arrow('date')}</th>
+    <th${sortKey === 'date' ? ` aria-sort="${sortDir === 1 ? 'ascending' : 'descending'}"` : ''}><button class="tx-sort" data-sort="date" aria-label="Urutkan tanggal">Tanggal${arrow('date')}</button></th>
     <th>Keterangan</th><th>Kategori</th><th>Akun</th>
-    <th class="sortable" data-sort="amount" tabindex="0" role="button" aria-label="Urutkan nominal" style="text-align:right">Nominal${arrow('amount')}</th><th style="text-align:right">Aksi</th>
+    <th style="text-align:right"${sortKey === 'amount' ? ` aria-sort="${sortDir === 1 ? 'ascending' : 'descending'}"` : ''}><button class="tx-sort" data-sort="amount" aria-label="Urutkan nominal">Nominal${arrow('amount')}</button></th><th style="text-align:right">Aksi</th>
   </tr></thead><tbody>${txs
     .map(
       (t) => `<tr><td style="white-space:nowrap">${escHtml(fmtTransactionDate(t.occurred_at))}</td>
@@ -213,14 +300,13 @@ function txTable(txs: Tx[], accName: Map<number, string>): string {
 }
 
 function txCards(txs: Tx[], accName: Map<number, string>): string {
-  if (txs.length === 0) return '<div class="empty"><div class="big">🧾</div>Belum ada transaksi.</div>';
   return txs
     .map((t) => {
       const avatarBg = t.kind === 'expense' ? '#e5484d' : t.kind === 'income' ? '#0e9f6e' : '#2b3445';
       const avatarSign = t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : '⇄';
       const amtCls = t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : '';
       const amtSign = t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : '';
-      return `<div class="between" style="padding:10px 0;border-bottom:1px solid var(--soft)">
+      return `<div class="between tx-detail-row">
       <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px;background:${avatarBg}">${avatarSign}</span>
       <div><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml([t.investment_symbol, t.note].filter(Boolean).join(' • '))}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(fmtTransactionDate(t.occurred_at))}</div></div></div>
       <div style="text-align:right"><div class="${amtCls}"><strong>${amtSign}${formatIdr(t.amount_idr)}</strong></div>
@@ -240,7 +326,7 @@ function openNew(el: HTMLElement, kind: string, accounts: AccountRef[]): void {
   (body.querySelector('#f-save') as HTMLButtonElement).onclick = async () => {
     const v = (id: string) => (body.querySelector(id) as HTMLInputElement | HTMLSelectElement).value;
     try {
-      await api.post('/api/transactions', {
+      const saved = await api.post('/api/transactions', {
         kind: v('#f-kind'),
         amount_idr: Number((body.querySelector('#f-amount') as HTMLInputElement).value),
         account_id: Number(v('#f-acc')),
@@ -248,10 +334,9 @@ function openNew(el: HTMLElement, kind: string, accounts: AccountRef[]): void {
         category: v('#f-cat') || 'Lainnya',
         note: v('#f-note'),
         occurred_at: readOccurredAt(body),
-      });
+      }) as Tx;
       close();
-      resetCache();
-      renderTransactions(el);
+      refreshAfterSave(el, saved);
     } catch (e) {
       alert((e as Error).message);
     }
@@ -282,17 +367,16 @@ function openEdit(el: HTMLElement, tx: Tx, accounts: AccountRef[]): void {
     btn.classList.add('btn-loading');
     const v = (id: string) => (body.querySelector(id) as HTMLInputElement | HTMLSelectElement).value;
     try {
-      await api.patch(`/api/transactions/${tx.id}`, {
+      const saved = await api.patch(`/api/transactions/${tx.id}`, {
         amount_idr: Number(v('#f-amount')),
         account_id: Number(v('#f-acc')),
         ...(tx.kind === 'transfer' ? { to_account_id: Number(v('#f-to')) } : {}),
         category: v('#f-cat') || tx.category,
         note: v('#f-note'),
         ...(dateField.value !== originalDate ? { occurred_at: readOccurredAt(body) } : {}),
-      });
+      }) as Tx;
       close();
-      resetCache();
-      renderTransactions(el);
+      refreshAfterSave(el, saved);
     } catch (err) {
       alert((err as Error).message);
       btn.disabled = false;

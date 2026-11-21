@@ -406,6 +406,60 @@ table.data tr.clickable:hover td { background: var(--primary-soft); }
 .toolbar input, .toolbar select { min-height: 40px; font-size: 14px; }
 .toolbar input[type="search"] { flex: 1; min-width: 160px; }
 
+/* ---------- transaction calendar ---------- */
+.tx-calendar-card h2, .tx-day-detail h2 { font-size: 16px; font-weight: 650; }
+.tx-filters { margin: 14px 0; }
+.tx-filters select { min-width: 0; max-width: 100%; }
+.tx-month-controls { display: grid; grid-template-columns: 44px minmax(0, 200px) 44px; align-items: center; gap: 8px; }
+.tx-month-controls .icon-btn { font-size: 23px; line-height: 1; }
+.tx-month-controls input { width: 100%; min-width: 0; min-height: 44px; font-weight: 650; }
+.tx-totals {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  margin: 14px 0 12px;
+}
+.tx-totals > div { background: var(--soft); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.tx-totals dt { color: var(--muted); font-size: 11px; }
+.tx-totals dd {
+  margin: 2px 0 0; font-size: clamp(12px, 1.5vw, 18px); font-weight: 700;
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.tx-calendar-caption { margin: 12px 0 8px; }
+.tx-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.tx-weekday { text-align: center; color: var(--muted); font-size: 11px; font-weight: 650; padding-bottom: 3px; }
+.tx-day, .tx-day-gap {
+  min-width: 0; min-height: 70px; border-radius: 10px; padding: 7px 8px; display: flex;
+  flex-direction: column; align-items: flex-start; justify-content: flex-start; line-height: 1.2;
+}
+.tx-day { border: 1px solid var(--border); text-align: left; font-variant-numeric: tabular-nums; }
+.tx-day-number { font-size: 12px; font-weight: 650; }
+.tx-day-amount { font-size: clamp(11px, 1.35vw, 16px); margin-top: 5px; line-height: 1.15; overflow-wrap: anywhere; }
+.tx-day-count { color: var(--muted); font-size: 10px; font-weight: 500; margin-top: 3px; }
+.tx-day-empty { background: var(--soft); color: var(--muted); }
+.tx-day-gap { background: transparent; }
+.tx-day[aria-current="date"] { border-color: var(--primary); }
+.tx-day[aria-current="date"] .tx-day-number { color: var(--primary); font-weight: 800; }
+.tx-day[aria-expanded="true"] { border-color: var(--primary); background: var(--primary-soft); }
+.tx-calendar-empty { margin: 10px 0 0; }
+.tx-day-detail h2 { scroll-margin-top: 145px; }
+.tx-day-detail .tx-sort { border: 0; padding: 0 3px; min-height: 30px; background: transparent; color: inherit; }
+.tx-day-detail .tx-sort:hover { color: var(--primary); }
+.tx-day-detail table.data.fixed { min-width: 760px; }
+.tx-day-detail table.data.fixed th:last-child { width: 156px; }
+.tx-detail-row { padding: 10px 0; border-bottom: 1px solid var(--soft); }
+.tx-detail-row > .row { min-width: 0; overflow-wrap: anywhere; }
+.tx-detail-row .avatar { flex: none; }
+
+@media (max-width: 599px) {
+  .tx-filters select { flex: 1 1 0; }
+  .tx-month-controls { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+  .tx-totals { gap: 5px; }
+  .tx-totals > div { padding: 8px 6px; }
+  .tx-calendar { gap: 3px; }
+  .tx-day, .tx-day-gap { min-height: 49px; border-radius: 7px; padding: 5px 2px; align-items: center; text-align: center; }
+  .tx-day-amount { font-size: clamp(8px, 2.35vw, 11px); }
+  .tx-day-count { display: none; }
+}
+
 /* ---------- drawer mobile (hamburger kanan) ---------- */
 #btn-menu { display: inline-grid; }
 .drawer-back {
