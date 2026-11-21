@@ -3,6 +3,7 @@ import { formatIdr, formatCompactIdr, fmtTransactionDate } from '../lib/format.j
 import { parseTimestamp, toWitaInput, witaMonth } from '../../shared/time.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { openModal, txForm, wireCatOptions, wireTxAccounts, readOccurredAt, type TxFormInit, type TxAccountRef } from '../components/modal.js';
+import { icons } from '../components/icons.js';
 import { isDesktop } from '../lib/state.js';
 
 interface Tx {
@@ -141,9 +142,9 @@ export async function renderTransactions(el: HTMLElement): Promise<void> {
       <select id="t-acc" aria-label="Filter akun" disabled><option value="">Semua akun</option></select>
     </div>
     <div class="tx-month-controls">
-      <button type="button" class="btn-ghost icon-btn" id="tx-prev" aria-label="Bulan sebelumnya"${month === '0001-01' ? ' disabled' : ''}>‹</button>
-      <input type="month" id="t-month" value="${month}" min="0001-01" max="9999-12" aria-label="Pilih bulan" />
-      <button type="button" class="btn-ghost icon-btn" id="tx-next" aria-label="Bulan berikutnya"${month === '9999-12' ? ' disabled' : ''}>›</button>
+      <button type="button" class="btn-ghost icon-btn" id="tx-prev" aria-label="Bulan sebelumnya"${month === '0001-01' ? ' disabled' : ''}>${icons.chevronLeft}</button>
+      <div class="tx-month-picker"><input type="month" id="t-month" value="${month}" min="0001-01" max="9999-12" aria-label="Pilih bulan" /></div>
+      <button type="button" class="btn-ghost icon-btn" id="tx-next" aria-label="Bulan berikutnya"${month === '9999-12' ? ' disabled' : ''}>${icons.chevronRight}</button>
     </div>
     <div id="tx-month-content" aria-busy="true"><p class="muted" role="status">Memuat transaksi…</p></div>
   </section>
