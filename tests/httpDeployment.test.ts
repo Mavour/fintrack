@@ -98,6 +98,18 @@ describe('HTTP IP and HTTPS deployments', () => {
     }
   });
 
+  it.runIf(fs.existsSync('dist/public/index.html'))('serves app HTML for page navigation and 404 for absent assets', async () => {
+    const headers = { accept: 'text/html' };
+    const page = await app.inject({ url: '/halaman', headers });
+    expect(page.statusCode).toBe(200);
+    expect(page.headers['content-type']).toContain('text/html');
+    for (const url of ['/assets/old.js', '/assets/old.css', '/missing.js']) {
+      const response = await app.inject({ url, headers });
+      expect(response.statusCode).toBe(404);
+      expect(response.headers['content-type']).not.toContain('text/html');
+    }
+  });
+
   it('uses external startup scripts allowed by the production CSP', () => {
     const html = fs.readFileSync('src/web/index.html', 'utf8');
     expect(html).toContain('<script src="/theme-init.js"></script>');

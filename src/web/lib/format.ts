@@ -55,9 +55,11 @@ export function todayLong(): string {
 
 export function fmtDate(iso: string): string {
   const d = parseTimestamp(iso);
+  if (!Number.isFinite(d.getTime())) return 'Tanggal perlu dikoreksi';
   return new Intl.DateTimeFormat('id-ID', { timeZone: WITA_ZONE, day: 'numeric', month: 'short', year: 'numeric' }).format(d);
 }
 
 export function fmtTransactionDate(iso: string): string {
-  return iso.length <= 10 ? fmtDate(iso) : `${fmtDate(iso)} • ${toWitaInput(iso).slice(11, 16)} WITA`;
+  const time = toWitaInput(iso).slice(11, 16);
+  return iso.length <= 10 || !time ? fmtDate(iso) : `${fmtDate(iso)} • ${time} WITA`;
 }

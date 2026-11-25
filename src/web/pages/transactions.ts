@@ -10,6 +10,15 @@ interface Tx {
   id: number; kind: string; amount_idr: number; account_id: number | null;
   to_account_id: number | null; category: string; note: string; occurred_at: string;
   investment_symbol?: string | null;
+  investment_asset_key?: string | null;
+}
+
+function transactionNote(tx: Tx): string {
+  const assetKey = tx.investment_asset_key;
+  const [, chain, contract] = assetKey?.split(':') ?? [];
+  const asset = [tx.investment_symbol, chain, contract ? `…${contract.slice(-8)}` : ''].filter(Boolean).join(' · ');
+  const text = escHtml([asset, tx.note].filter(Boolean).join(' • '));
+  return assetKey ? `<span title="${escAttr(assetKey)}">${text}</span>` : text;
 }
 
 type AccountRef = TxAccountRef;
@@ -121,7 +130,7 @@ function calendar(month: string, groups: Map<string, Tx[]>): string {
 function matchesFilters(tx: Tx, query: string): boolean {
   return (!fCat || tx.category === fCat)
     && (!fAcc || String(tx.account_id) === fAcc || String(tx.to_account_id) === fAcc)
-    && (!query || [tx.note, tx.category, tx.investment_symbol].some((value) => value?.toLowerCase().includes(query)));
+    && (!query || [tx.note, tx.category, tx.investment_symbol, tx.investment_asset_key].some((value) => value?.toLowerCase().includes(query)));
 }
 
 function refreshAfterSave(el: HTMLElement, tx: Tx): void {
@@ -292,7 +301,7 @@ function txTable(txs: Tx[], accName: Map<number, string>): string {
   </tr></thead><tbody>${txs
     .map(
       (t) => `<tr><td style="white-space:nowrap">${escHtml(fmtTransactionDate(t.occurred_at))}</td>
-      <td>${escHtml([t.investment_symbol, t.note].filter(Boolean).join(' • ')) || '—'}${t.kind === 'transfer' ? `<div class="muted">→ ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}</div>` : ''}</td>
+      <td>${transactionNote(t) || '—'}${t.kind === 'transfer' ? `<div class="muted">→ ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}</div>` : ''}</td>
       <td>${escHtml(t.category)}</td><td>${escHtml(accName.get(t.account_id ?? -1) ?? '—')}</td>
       <td style="text-align:right" class="${t.kind === 'expense' ? 'neg' : t.kind === 'income' ? 'pos' : ''}"><strong>${t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : ''}${formatIdr(t.amount_idr)}</strong></td>
       <td style="text-align:right;white-space:nowrap"><button class="btn-ghost" data-edit-id="${t.id}" style="min-height:40px">Ubah</button> <button class="btn-ghost" data-del="${t.id}" style="min-height:40px">Hapus</button></td></tr>`,
@@ -309,7 +318,7 @@ function txCards(txs: Tx[], accName: Map<number, string>): string {
       const amtSign = t.kind === 'expense' ? '−' : t.kind === 'income' ? '+' : '';
       return `<div class="between tx-detail-row">
       <div class="row"><span class="avatar" style="width:38px;height:38px;font-size:15px;background:${avatarBg}">${avatarSign}</span>
-      <div><strong>${escHtml(t.category)}</strong><div class="muted">${escHtml([t.investment_symbol, t.note].filter(Boolean).join(' • '))}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(fmtTransactionDate(t.occurred_at))}</div></div></div>
+      <div><strong>${escHtml(t.category)}</strong><div class="muted">${transactionNote(t)}${t.kind === 'transfer' ? ` → ${escHtml(accName.get(t.to_account_id ?? -1) ?? '')}` : ''} • ${escHtml(accName.get(t.account_id ?? -1) ?? '')} • ${escHtml(fmtTransactionDate(t.occurred_at))}</div></div></div>
       <div style="text-align:right"><div class="${amtCls}"><strong>${amtSign}${formatIdr(t.amount_idr)}</strong></div>
       <div class="row" style="gap:6px;justify-content:flex-end;margin-top:4px"><button class="btn-ghost" data-edit-id="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Ubah</button><button class="btn-ghost" data-del="${t.id}" style="min-height:40px;font-size:12px;padding:4px 10px">Hapus</button></div></div></div>`;
     })

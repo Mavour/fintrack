@@ -11,6 +11,7 @@ import { icons } from '../components/icons.js';
 import { coinAvatar } from '../lib/coinIcons.js';
 import { openAddAccountModal } from './accounts.js';
 import type { PortfolioFrame } from './portfolio.js';
+import type { ValuationCoverage } from '../../shared/valuation.js';
 
 const show = (n: number) => (isPrivat() ? '••••••' : formatIdr(n));
 const showCompact = (n: number) => (isPrivat() ? '•••' : formatCompactIdr(n));
@@ -21,6 +22,14 @@ function setText(node: Element | null, value: string): void {
   else node.textContent = value;
 }
 
+function valuationNotice(coverage?: ValuationCoverage): string {
+  if (!coverage || coverage.complete) return '';
+  const labels = { manual: 'aset manual', wallet: 'wallet', defi: 'DeFi', lp: 'LP' };
+  const reasons = coverage.missing_prices.length ? [`Harga atau nilai belum tersedia untuk ${coverage.missing_prices.map((kind) => labels[kind]).join(', ')}`] : [];
+  if (coverage.missing_fx) reasons.push('Kurs USD/IDR belum tersedia');
+  return `Valuasi sebagian · ${reasons.join(' · ')}`;
+}
+
 export function applyLiveHome(el: HTMLElement, frame: PortfolioFrame): void {
   const card = el.querySelector<HTMLElement>('[data-live-cash]');
   if (!card) return;
@@ -28,6 +37,12 @@ export function applyLiveHome(el: HTMLElement, frame: PortfolioFrame): void {
   const wealth = cash + frame.total_value_idr;
   const amount = card.querySelector('.big-num');
   setText(amount, show(wealth));
+  const notice = card.querySelector<HTMLElement>('[data-valuation-coverage]');
+  if (notice && frame.valuation_coverage) {
+    const message = valuationNotice(frame.valuation_coverage);
+    notice.hidden = !message;
+    setText(notice, message);
+  }
   const pill = card.querySelector('.pill');
   if (pill) { setText(pill, `P/L ${isPrivat() ? '•••' : formatIdr(frame.floating_pl_idr)}`); pill.className = `pill ${frame.floating_pl_idr >= 0 ? 'up' : 'down'}`; }
   el.querySelectorAll<HTMLElement>('[data-live-allocation]').forEach((tile) => {
@@ -82,6 +97,7 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
   const [dash, accounts, txs, pf] = await Promise.all([
     api.get(`/api/dashboard?month=${month}`) as Promise<{
       total_wealth_idr: number; total_pl_idr: number;
+      valuation_coverage?: ValuationCoverage;
       allocation: Array<{ label: string; value_idr: number }>;
       expense_by_category: Array<{ category: string; total_idr: number }>;
     }>,
@@ -122,12 +138,14 @@ export async function renderHome(el: HTMLElement, background = false): Promise<v
     )
     .join('');
   const pl = dash.total_pl_idr;
+  const coverageNotice = valuationNotice(dash.valuation_coverage);
 
   const intro = `<div class="dashboard-intro"><div><div class="eyebrow">Ringkasan keuangan</div><h1>Lebih dekat dengan tujuan Anda.</h1><p>Kas, investasi, dan wallet dalam satu pandangan.</p></div><a class="overview-link" href="#/portofolio">Lihat portofolio <span aria-hidden="true">↗</span></a></div>`;
   const balanceCard = `
     <div class="card wealth-card" data-live-cash="${alloc.find((a) => a.label === 'Kas')?.value_idr ?? 0}">
       <div class="between"><span class="networth-label">Total kekayaan bersih</span><span class="wealth-icon">${icons.wallet}</span></div>
       <div class="big-num">${show(dash.total_wealth_idr)}</div>
+      <div class="muted" data-valuation-coverage role="status"${coverageNotice ? '' : ' hidden'}>${escHtml(coverageNotice)}</div>
       <div class="wealth-caption"><span class="pill ${pl >= 0 ? 'up' : 'down'}">P/L ${isPrivat() ? '•••' : formatIdr(pl)}</span><span>Berdasarkan modal tercatat</span></div>
       <div class="alloc-bar" role="img" aria-label="Alokasi aset">${sorted.map((a, i) => `<span style="width:${((a.value_idr / total) * 100).toFixed(1)}%;background:${ALLOC_COLORS[i % 4]}" title="${escAttr(a.label)}"></span>`).join('')}</div>
       <div class="tiles">

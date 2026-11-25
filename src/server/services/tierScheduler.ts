@@ -4,6 +4,8 @@ import { syncAllWallets, syncEvmTier, recordSyncStatus } from './walletSync.js';
 import { dailyProjection, unitsUsedLast24h, EVM_THROTTLE_LADDER, nextThrottleUp, nextThrottleDown, maybeRefreshHyperCoverage } from './debankMeter.js';
 import { emitSyncDone, minutesSinceLastClient, type SyncScope } from './sse.js';
 import { logger } from '../logger.js';
+import { listWallets } from './walletRegistry.js';
+import { refreshDlmmMonitor } from './meteoraDlmmMonitor.js';
 
 /**
  * Scheduler bertingkat (near-real-time), satu proses tunggal:
@@ -101,7 +103,15 @@ async function runPriceTier(db: Database.Database): Promise<boolean> {
 }
 
 async function runLpTier(db: Database.Database): Promise<{ changed: boolean; retryAfterMs: number | null }> {
+  const monitor = (async () => {
+    for (const wallet of listWallets(db)) {
+      await refreshDlmmMonitor(db, wallet).catch((err: unknown) => {
+        logger.warn({ err, walletId: wallet.id }, 'Penyimpanan pemantauan Meteora DLMM gagal');
+      });
+    }
+  })();
   const results = await syncAllWallets(db, 'solana', 'lp');
+  await monitor;
   let changed = false;
   let retryAfterMs: number | null = null;
   let failures = 0;

@@ -4,6 +4,8 @@ import path from 'node:path';
 import { Decimal } from 'decimal.js';
 import { fileURLToPath } from 'node:url';
 import { restorePortfolioSeed } from './portfolioSeed.js';
+import { normalizeTransactionTimestamp } from '../../shared/time.js';
+import { logger } from '../logger.js';
 
 let db: Database.Database | null = null;
 
@@ -32,6 +34,7 @@ export function runMigrations(database: Database.Database): void {
   const sql = fs.readFileSync(schemaPath, 'utf-8');
   database.exec(sql);
   runColumnMigrations(database);
+  normalizeTransactionDates(database);
   seedAssetMap(database);
   backfillAssetMints(database);
 }
@@ -50,6 +53,23 @@ function runColumnMigrations(database: Database.Database): void {
   if (!cols.some((c) => c.name === 'mint')) database.exec('ALTER TABLE assets ADD COLUMN mint TEXT');
   if (!cols.some((c) => c.name === 'superseded_by_wallet'))
     database.exec('ALTER TABLE assets ADD COLUMN superseded_by_wallet INTEGER NOT NULL DEFAULT 0');
+  const withdrawalCols = database.prepare('PRAGMA table_info(investment_withdrawals)').all() as Array<{ name: string }>;
+  if (!withdrawalCols.some((c) => c.name === 'wallet_asset_key'))
+    database.exec('ALTER TABLE investment_withdrawals ADD COLUMN wallet_asset_key TEXT');
+}
+
+function normalizeTransactionDates(database: Database.Database): void {
+  const idsToCorrect: number[] = [];
+  database.transaction(() => {
+    const rows = database.prepare('SELECT id, occurred_at FROM transactions').all() as Array<{ id: number; occurred_at: string }>;
+    const update = database.prepare('UPDATE transactions SET occurred_at = ? WHERE id = ?');
+    for (const row of rows) {
+      const date = normalizeTransactionTimestamp(row.occurred_at);
+      if (date === null) idsToCorrect.push(row.id);
+      else if (date !== row.occurred_at) update.run(date, row.id);
+    }
+  }).immediate();
+  if (idsToCorrect.length) logger.warn({ transactionIds: idsToCorrect }, 'Tanggal transaksi perlu dikoreksi');
 }
 
 /**

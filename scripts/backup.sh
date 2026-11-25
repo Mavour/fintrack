@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Daily SQLite backup via cron: 0 2 * * * /opt/dompet/scripts/backup.sh
+# Backup ad hoc atau cron eksternal untuk deployment tanpa jadwal bawaan.
 set -euo pipefail
-DB="${DATABASE_PATH:-./data/app.db}"
-DIR="${BACKUP_DIR:-./backups}"
-mkdir -p "$DIR"
-STAMP=$(date +%F)
-sqlite3 "$DB" ".backup '$DIR/app-$STAMP.db'"
-ls -t "$DIR"/app-*.db | tail -n +15 | xargs -r rm --
-echo "backup ok: $DIR/app-$STAMP.db"
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+node --input-type=module <<'NODE'
+import 'dotenv/config';
+import Database from 'better-sqlite3';
+import { runBackup } from './dist/server/jobs/backup.js';
+
+const db = new Database(process.env.DATABASE_PATH ?? './data/app.db', { readonly: true, fileMustExist: true });
+try {
+  runBackup(db, process.env.BACKUP_DIR ?? './backups', Number(process.env.BACKUP_RETENTION_DAYS ?? 14));
+} finally {
+  db.close();
+}
+NODE

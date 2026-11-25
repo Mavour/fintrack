@@ -1,5 +1,11 @@
 # Background DOM update regression
 
+Jalankan `npm run build`, `npx playwright-core install chromium`, lalu
+`npm run test:browser` untuk menguji pergantian versi PWA, cache API,
+indikator valuasi live dan tampilan Meteora DLMM di Chromium. Set
+`FINTRACK_CHROMIUM_EXECUTABLE` ke path Chrome lokal jika Chromium bawaan belum
+diunduh. Pengujian menggunakan database in-memory dan data sintetis.
+
 After `npm run build`, compile `src/web/lib/patchContent.ts` with TypeScript
 (`--target ES2022 --module ES2022 --lib ES2022,DOM,DOM.Iterable --skipLibCheck`)
 into `dist/public/__regression/`. Copy `patchContent.mjs` from this directory

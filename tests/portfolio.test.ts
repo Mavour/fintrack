@@ -256,16 +256,12 @@ describe('history all-time', () => {
   it('prune keeps 48h full + daily skeleton', () => {
     const db = memDb();
     const ins = db.prepare(`INSERT INTO price_history (symbol, price_idr, fetched_at) VALUES ('X', 100, ?)`);
-    const now = Date.now();
-    // 3 points same old day -> keep latest only
-    ins.run(new Date(now - 5 * 86400000).toISOString().slice(0, 19).replace('T', ' '));
-    ins.run(new Date(now - 5 * 86400000 + 3600000).toISOString().slice(0, 19).replace('T', ' '));
-    // 2 recent points -> keep both
-    ins.run(new Date(now - 3600000).toISOString().slice(0, 19).replace('T', ' '));
-    ins.run(new Date(now - 60000).toISOString().slice(0, 19).replace('T', ' '));
-    pruneHistory(db);
-    const c = db.prepare(`SELECT COUNT(*) AS c FROM price_history`).get() as { c: number };
-    expect(c.c).toBe(3);
+    for (const at of ['2026-11-20 22:00:00', '2026-11-20 23:59:59', '2026-11-21 00:00:00',
+      '2026-11-23 23:50:00', '2026-11-23 23:59:59', '2026-11-24 00:00:00', '2026-11-24 00:00:01']) ins.run(at);
+    pruneHistory(db, '2026-11-25T23:59:59.000Z');
+    expect(db.prepare('SELECT fetched_at FROM price_history ORDER BY fetched_at').pluck().all()).toEqual([
+      '2026-11-20 23:59:59', '2026-11-21 00:00:00', '2026-11-23 23:59:59', '2026-11-24 00:00:00', '2026-11-24 00:00:01',
+    ]);
     db.close();
   });
 

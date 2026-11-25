@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE TABLE IF NOT EXISTS investment_withdrawals (
   transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
   symbol TEXT NOT NULL,
+  wallet_asset_key TEXT,
   asset_id INTEGER REFERENCES assets(id) ON DELETE RESTRICT,
   qty TEXT,
   cost_idr INTEGER CHECK (cost_idr >= 0),
@@ -159,6 +160,15 @@ CREATE TABLE IF NOT EXISTS lp_positions (
   UNIQUE (wallet_id, protocol, pool_address, position_address)
 );
 CREATE INDEX IF NOT EXISTS idx_lp_positions_wallet ON lp_positions(wallet_id);
+
+CREATE TABLE IF NOT EXISTS meteora_dlmm_snapshots (
+  wallet_id INTEGER PRIMARY KEY REFERENCES wallets(id) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL,
+  attempted_at INTEGER NOT NULL,
+  synced_at INTEGER,
+  failed INTEGER NOT NULL DEFAULT 0,
+  positions_json TEXT NOT NULL DEFAULT '[]'
+);
 
 -- Per-provider sync health. units_remaining tracks DeBank quota.
 CREATE TABLE IF NOT EXISTS sync_status (

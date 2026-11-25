@@ -1,7 +1,7 @@
 import { api } from '../lib/api.js';
 import { patchContent, renderContent } from '../lib/patchContent.js';
 import { isScrollActive } from '../lib/scrollActivity.js';
-import { formatIdr, formatPct, formatUsd, timeAgo } from '../lib/format.js';
+import { formatIdr, formatPct, formatUsd, fmtTransactionDate, timeAgo } from '../lib/format.js';
 import { escAttr, escHtml } from '../lib/escape.js';
 import { coinAvatar } from '../lib/coinIcons.js';
 import { wealthTrendCard } from '../lib/trend.js';
@@ -11,6 +11,7 @@ import { occurredAtField, openModal, readOccurredAt, type TxAccountRef } from '.
 import { invalidateTxCache } from './transactions.js';
 import { isDesktop, isPrivat } from '../lib/state.js';
 import { chainBadge, walletChip, walletUrl } from '../lib/chains.js';
+import type { DlmmWalletSnapshot } from '../../shared/meteoraDlmm.js';
 
 let filter = 'Semua';
 let portfolioRenderId = 0;
@@ -112,6 +113,7 @@ function cryptoFeed(mode: 'stream' | 'periodic' | 'mixed' | undefined): string {
 }
 
 export interface PortfolioFrame {
+  valuation_coverage?: import('../../shared/valuation.js').ValuationCoverage;
   assets: AssetV[]; wallet_tokens: WalletTokenV[];
   total_value_idr: number; floating_pl_idr: number; by_type: Record<string, number>;
 }
@@ -717,9 +719,10 @@ function openWithdrawalForm(el: HTMLElement, initial?: AssetV | WalletTokenV): v
     bank.innerHTML = `<option value="">${banks.length ? 'Pilih rekening' : 'Belum ada rekening bank aktif'}</option>`
       + banks.map((a) => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('');
     bank.disabled = !banks.length;
-    const initialKey = initial?.source === 'wallet' ? initial.asset_key ?? initial.symbol : initial?.symbol;
-    const preselected = assets.find((a) => a.source === initial?.source && a.key === initialKey);
-    if (preselected) type.value = preselected.type;
+    const candidates = initial ? assets.filter((a) => a.source === initial.source && a.symbol === initial.symbol) : [];
+    const preselected = candidates.find((a) => a.key === (initial?.source === 'wallet' ? initial.asset_key : initial?.symbol))
+      ?? (candidates.length === 1 ? candidates[0] : undefined);
+    if (initial) type.value = initial.type;
     updateChoices(preselected ? assetKey(preselected) : '');
   }).catch((err: Error) => {
     type.replaceChildren(new Option('Gagal memuat aset', ''));
@@ -738,7 +741,7 @@ function openWithdrawalForm(el: HTMLElement, initial?: AssetV | WalletTokenV): v
       await api.post('/api/portfolio/withdrawals', {
         source: selected.source,
         symbol: selected.symbol,
-        ...(selected.source === 'manual' ? { qty: qty.value.trim().replace(',', '.') } : {}),
+        ...(selected.source === 'manual' ? { qty: qty.value.trim().replace(',', '.') } : { asset_key: selected.key }),
         amount_idr: Number(input('#w-amount')),
         account_id: Number(bank.value),
         note: input('#w-note'),
@@ -925,6 +928,7 @@ async function walletPositionsCard(): Promise<{ content: string; status: string;
     in_range: number | null; position_address: string;
   }> = [];
   let lpSummary: { total_fees_usd: number; total_position_usd: number; count: number } = { total_fees_usd: 0, total_position_usd: 0, count: 0 };
+  let dlmm: DlmmWalletSnapshot[] = [];
   let health: { mode: string; last_success_at: string | null } = { mode: 'empty', last_success_at: null };
   let tiers: Record<string, { intervalSec: number; activeIntervalSec: number; lastSuccessAt: string | null; throttled: boolean; note: string | null }> | null = null;
   let usdIdr = 16000;
@@ -934,9 +938,10 @@ async function walletPositionsCard(): Promise<{ content: string; status: string;
   try {
     const reg = (await api.get('/api/wallets/registry')) as { wallets: typeof wallets };
     wallets = reg.wallets;
-    const lpr = (await api.get('/api/wallets/lp')) as { summary: typeof lpSummary; positions: typeof lp };
+    const lpr = (await api.get('/api/wallets/lp')) as { summary: typeof lpSummary; positions: typeof lp; meteora_dlmm?: DlmmWalletSnapshot[] };
     lp = lpr.positions;
     lpSummary = lpr.summary;
+    dlmm = lpr.meteora_dlmm ?? [];
     const st = (await api.get('/api/wallets/status')) as {
       health: typeof health; usd_idr: number;
       tiers?: Record<string, { intervalSec: number; activeIntervalSec: number; lastSuccessAt: string | null; throttled: boolean; note: string | null }>;
@@ -1003,5 +1008,30 @@ async function walletPositionsCard(): Promise<{ content: string; status: string;
       ${providerWarns.length ? `<ul>${providerWarns.map((w) => `<li>${escHtml(w)}</li>`).join('')}</ul>` : health.mode === 'live' ? '<p>Provider yang aktif berhasil diperbarui.</p>' : '<p>Sebagian data tertunda. Snapshot terakhir tetap ditampilkan.</p>'}
       ${debankProj ? `<p>${escHtml(debankProj)}</p>` : ''}<a href="#/akun">Rincian per wallet ↗</a></div>
   </details>`;
-  return { content: `<div class="card lp-section"><div class="section-header"><h2 class="section-heading">Posisi LP</h2><span class="muted">Nilai posisi + fees, dihitung sekali</span></div><div style="margin-top:12px">${body}</div></div>`, status, count: lpSummary.count };
+  const monitor = renderDlmmMonitor(dlmm, walletChipFor);
+  return { content: `<div class="card lp-section"><div class="section-header"><h2 class="section-heading">Posisi LP</h2><span class="muted">Nilai posisi + fees, dihitung sekali</span></div><div style="margin-top:12px">${body}</div></div>${monitor}`, status, count: lpSummary.count };
+}
+
+function renderDlmmMonitor(snapshots: DlmmWalletSnapshot[], walletChipFor: (id: number) => string): string {
+  if (!snapshots.length) return '';
+  const labels = { pending: 'Menunggu sinkronisasi', unavailable: 'Data belum tersedia', ready: 'Tersinkron', stale: 'Data tertunda' };
+  return `<section class="card lp-section" aria-labelledby="dlmm-monitor-title">
+    <h2 class="section-heading" id="dlmm-monitor-title">Pemantauan Meteora DLMM</h2>
+    ${snapshots.map((snapshot) => `<div id="dlmm-wallet-${snapshot.wallet_id}" style="margin-top:12px">
+      <div class="row wrap">${walletChipFor(snapshot.wallet_id)}<span class="range-chip ${snapshot.state === 'ready' ? 'in' : 'out'}">${labels[snapshot.state]}</span>
+        ${snapshot.synced_at ? `<time class="muted" datetime="${escAttr(snapshot.synced_at)}">${escHtml(fmtTransactionDate(snapshot.synced_at))}</time>` : ''}</div>
+      ${snapshot.positions.length ? snapshot.positions.map((position) => {
+        const x = `${position.token_x_mint.slice(0, 6)}…`;
+        const y = `${position.token_y_mint.slice(0, 6)}…`;
+        const tokens = position.pair?.split('/') ?? [];
+        const fees = isPrivat() ? '•••' : `${escHtml(position.fee_x)} <abbr title="${escAttr(position.token_x_mint)}">${escHtml(tokens[0] || x)}</abbr> · ${escHtml(position.fee_y)} <abbr title="${escAttr(position.token_y_mint)}">${escHtml(tokens[1] || y)}</abbr>`;
+        return `<article id="dlmm-${snapshot.wallet_id}-${escAttr(position.position_address)}" class="card asset-card">
+          <div class="row wrap"><strong>${escHtml(position.pair || `${x}/${y}`)}</strong><span class="range-chip ${position.in_range ? 'in' : 'out'}">${position.in_range ? 'Dalam rentang' : 'Di luar rentang'}</span></div>
+          <a class="text-link" href="https://solscan.io/account/${encodeURIComponent(position.position_address)}" target="_blank" rel="noopener noreferrer" title="${escAttr(position.position_address)}">Posisi ${escHtml(position.position_address.slice(0, 8))}…${escHtml(position.position_address.slice(-6))} ↗</a>
+          <div class="lp-nums"><div><span class="eyebrow">Rentang bin</span><strong>${position.lower_bin} hingga ${position.upper_bin}</strong></div>
+          <div><span class="eyebrow">Bin aktif</span><strong>${position.active_bin}</strong></div>
+          <div><span class="eyebrow">Fees belum diklaim</span><strong>${fees}</strong></div></div></article>`;
+      }).join('') : snapshot.state === 'ready' ? '<p class="muted">Tidak ada posisi DLMM terbuka.</p>' : ''}
+    </div>`).join('')}
+  </section>`;
 }

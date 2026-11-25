@@ -75,7 +75,8 @@ const DlmmTvl = z.object({
 }).passthrough();
 
 function toNullableNum(v: unknown): number | null {
-  const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/,/g, ''));
+  if (typeof v !== 'number' && (typeof v !== 'string' || !v.trim())) return null;
+  const n = typeof v === 'number' ? v : Number(v.replace(/,/g, ''));
   return Number.isFinite(n) ? n : null;
 }
 

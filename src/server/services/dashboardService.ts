@@ -4,6 +4,7 @@ import { getCachedUsdIdr } from '../providers/fxRate.js';
 import { witaMonth } from '../../shared/time.js';
 
 export interface DashboardSummary {
+  valuation_coverage: ReturnType<typeof getUnifiedPortfolio>['valuation_coverage'];
   total_cash_idr: number;
   total_invested_value_idr: number;
   total_wealth_idr: number;
@@ -76,6 +77,7 @@ export function getDashboard(db: Database.Database, month?: string): DashboardSu
     .all(m) as Array<{ category: string; total_idr: number }>;
 
   return {
+    valuation_coverage: uni.valuation_coverage,
     total_cash_idr: cashRow.t,
     total_invested_value_idr: invested,
     total_wealth_idr: cashRow.t + invested,

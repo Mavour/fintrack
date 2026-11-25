@@ -14,6 +14,7 @@ import { listPositions, listLp, lpSummary, getSyncStatus, walletSyncHealth } fro
 import { DebankProvider } from '../providers/debank.js';
 import { getTierStatus, isIdleMode, triggerAllTiersNow } from '../services/tierScheduler.js';
 import { unitsUsedLast24h, callsPerEndpoint24h, getCachedHyperCoverage } from '../services/debankMeter.js';
+import { listDlmmMonitor, refreshDlmmMonitor } from '../services/meteoraDlmmMonitor.js';
 
 const LABELS: Record<string, string> = {
   solana: 'Solana (Jupiter)',
@@ -117,7 +118,7 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
       const params = z.object({ id: z.coerce.number().int() }).parse((req as { params: unknown }).params);
       // Cooldown khusus klik manual (sync otomatis tier tidak ikut dihitung).
       checkManualSyncCooldown(db, manualSyncKeyWallet(params.id), getConfig().walletSyncCooldownMs);
-      const out = await syncWallet(db, params.id);
+      const out = await syncWalletWithDlmm(db, params.id);
       markManualSync(db, manualSyncKeyWallet(params.id));
       return out;
     } catch (e: unknown) {
@@ -145,7 +146,9 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
     const q = z
       .object({ wallet_id: z.coerce.number().int().optional(), chain_id: z.string().max(40).optional() })
       .parse((req as { query: unknown }).query);
-    return { summary: lpSummary(db), positions: listLp(db, q) };
+    const positions = listLp(db, q);
+    const meteora_dlmm = !q.chain_id || q.chain_id === 'solana' ? listDlmmMonitor(db, positions, q.wallet_id) : [];
+    return { summary: lpSummary(db), positions, meteora_dlmm };
   });
 
   // --- Sync health + DeBank units (for topbar badge + quota warning) ---
@@ -200,11 +203,20 @@ export function registerWalletRoutes(app: FastifyInstance, db: Database.Database
  * Tidak memakai cooldown manual; UI ter-refresh otomatis via SSE bila berubah.
  */
 function backgroundSyncWallet(db: Database.Database, walletId: number, networkType: string): void {
-  void syncWallet(db, walletId, 'all')
+  void syncWalletWithDlmm(db, walletId)
     .then((r) => {
       if (r.ok && !r.unchanged) emitSyncDone([networkType === 'evm' ? 'evm' : 'solana']);
     })
     .catch((e: unknown) => {
       logger.warn({ err: (e as Error).message, walletId }, 'background sync setelah ubah wallet gagal');
     });
+}
+
+async function syncWalletWithDlmm(db: Database.Database, walletId: number) {
+  const wallet = getWallet(db, walletId);
+  const monitor = wallet && refreshDlmmMonitor(db, wallet).catch((err: unknown) => {
+    logger.warn({ err, walletId }, 'Penyimpanan pemantauan Meteora DLMM gagal');
+  });
+  const [out] = await Promise.all([syncWallet(db, walletId), monitor]);
+  return out;
 }

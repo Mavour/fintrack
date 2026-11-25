@@ -40,3 +40,20 @@ Saldo bank, jumlah unit, modal, alamat wallet dan posisi tersimpan mengikuti
 snapshot lokal. Nilai pasar dapat berubah setelah sinkron harga/on-chain aktif;
 itu bukan selisih hasil impor. Harga streaming di memori mengikuti feed terbaru.
 `PORTFOLIO_SNAPSHOT_PATH` bisa dipakai untuk lokasi file privat lain.
+
+## Uji pemulihan backup SQLite harian
+
+Backup harian berisi database lengkap, termasuk transaksi dan data autentikasi.
+Simpan salinan secara privat. Untuk menguji pemulihan, buat database sementara
+di direktori privat yang belum berisi `restored.db`.
+
+```sh
+sqlite3 'backups/app-YYYY-MM-DD.db' ".backup '/path/privat/restored.db'"
+sqlite3 -readonly '/path/privat/restored.db' 'PRAGMA integrity_check; SELECT id, name, balance_idr FROM accounts ORDER BY id; SELECT COUNT(*) FROM transactions;'
+```
+
+Pastikan pemeriksaan mengembalikan `ok` dan cocokkan saldo serta jumlah transaksi
+dengan catatan saat backup dibuat. `restored.db` dapat diuji dengan instance lokal
+yang menunjuk `DATABASE_PATH` ke salinan tersebut. Hentikan instance sebelum
+memindahkan database aktif. Simpan salinan database aktif beserta file WAL/SHM
+terkait jika ada, lalu pasang database hasil pemulihan dan jalankan ulang aplikasi.

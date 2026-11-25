@@ -97,13 +97,18 @@ export async function buildApp() {
       if (req.method !== 'GET' || url.startsWith('/api/')) return;
       if (url === '/' || url.endsWith('/index.html')) {
         reply.header('Cache-Control', 'no-store');
-      } else if (url.includes('/assets/')) {
+      } else if (url.startsWith('/assets/') && reply.statusCode < 400) {
         reply.header('Cache-Control', 'public, max-age=31536000, immutable');
       }
     });
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'Not found' });
-      return reply.sendFile('index.html');
+      const url = req.url.split('?')[0];
+      const pageRequest = (req.method === 'GET' || req.method === 'HEAD') &&
+        (req.headers['sec-fetch-mode'] === 'navigate' || req.headers.accept?.includes('text/html'));
+      if (pageRequest && !url.startsWith('/api/') && !url.startsWith('/assets/') && !path.posix.extname(url)) {
+        return reply.header('Cache-Control', 'no-store').sendFile('index.html');
+      }
+      return reply.header('Cache-Control', 'no-store').code(404).send({ error: 'Not found' });
     });
   }
 

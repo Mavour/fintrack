@@ -79,7 +79,7 @@ describe('investment withdrawal and account corrections', () => {
       { type: 'crypto', source: 'manual', key: 'BTC', symbol: 'BTC', name: 'Bitcoin', qty: '0.01' },
       { type: 'reksadana', source: 'manual', key: 'RD66', symbol: 'RD66', name: 'Reksadana uji', qty: '120' },
       { type: 'saham', source: 'manual', key: 'BBCA.JK', symbol: 'BBCA.JK', name: 'BCA', qty: '500' },
-      { type: 'crypto', source: 'wallet', key: 'SOL', symbol: 'SOL', name: 'Solana', chains: ['solana'] },
+      { type: 'crypto', source: 'wallet', key: 'SOL:solana', symbol: 'SOL', name: 'Solana', chains: ['solana'] },
     ]);
     expect((await withdraw({ source: 'manual', symbol: 'SOL', qty: '1', amount_idr: 10_000, account_id: bank })).statusCode).toBe(400);
     expect(balance(bank)).toBe(50_000);
@@ -94,11 +94,39 @@ describe('investment withdrawal and account corrections', () => {
     expect(getAssetBySymbol(db, 'SOL')?.qty).toBe('2');
     expect(balance(bank)).toBe(50_000);
     expect((await app.inject({ method: 'GET', url: '/api/transactions' })).json()).toEqual([]);
+    db.prepare("INSERT INTO wallets (id, address, network_type) VALUES (1, 'test-wallet', 'solana')").run();
+    db.prepare("INSERT INTO wallet_positions (wallet_id, chain_id, kind, symbol, amount) VALUES (1, 'solana', 'token', 'SOL', '1')").run();
     const wallet = await withdraw({ source: 'wallet', symbol: 'sol', account_id: bank, amount_idr: 10_000 });
     expect(wallet.statusCode).toBe(201);
     expect(wallet.json().investment_symbol).toBe('SOL');
     expect(getAssetBySymbol(db, 'SOL')?.qty).toBe('2');
     expect(balance(bank)).toBe(60_000);
+  });
+
+  it('records distinct wallet contracts and rejects ambiguous or forged keys', async () => {
+    db.prepare("INSERT INTO wallets (id, address, network_type) VALUES (1, 'test-wallet', 'solana')").run();
+    const position = db.prepare("INSERT INTO wallet_positions (wallet_id, chain_id, kind, symbol, amount, meta) VALUES (1, 'solana', 'token', 'SAME', '1', ?)");
+    for (const mint of ['MintA', 'MintB']) position.run(JSON.stringify({ mint }));
+    const data = { source: 'wallet', symbol: 'SAME', account_id: bank, amount_idr: 10 };
+    expect((await withdraw(data)).statusCode).toBe(400);
+    expect((await withdraw({ ...data, asset_key: 'SAME:solana:MintC' })).statusCode).toBe(400);
+    expect(balance(bank)).toBe(50_000);
+    for (const mint of ['MintA', 'MintB']) {
+      const key = `SAME:solana:${mint}`;
+      const response = await withdraw({ ...data, asset_key: key });
+      expect(response.statusCode).toBe(201);
+      expect(response.json().investment_asset_key).toBe(key);
+    }
+    const history = (await app.inject('/api/transactions')).json();
+    expect(history.map((tx: { investment_asset_key: string }) => tx.investment_asset_key)).toEqual(['SAME:solana:MintB', 'SAME:solana:MintA']);
+  });
+
+  it('rejects an invalid date before subtracting investment units', async () => {
+    upsertAsset(db, { type: 'reksadana', symbol: 'RD66', name: 'Reksadana uji', qty: '2', avg_buy_price_idr: 1000 });
+    const response = await withdraw({ source: 'manual', symbol: 'RD66', qty: '1', account_id: bank, amount_idr: 1000, occurred_at: '2026-02-30' });
+    expect(response.statusCode).toBe(400);
+    expect(getAssetBySymbol(db, 'RD66')?.qty).toBe('2');
+    expect(balance(bank)).toBe(50_000);
   });
 
   it('corrects the source and destination of existing transactions atomically', async () => {

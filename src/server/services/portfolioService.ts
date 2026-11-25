@@ -409,6 +409,7 @@ export interface ManualAssetV extends AssetValuation {
 }
 
 export interface UnifiedPortfolio {
+  valuation_coverage: import('../../shared/valuation.js').ValuationCoverage;
   unpriced_manual_assets: number;
   assets: ManualAssetV[];
   wallet_tokens: WalletTokenV[];
@@ -454,13 +455,19 @@ export function listWithdrawalAssets(db: Database.Database) {
     .filter((a) => !a.symbol.startsWith('LP-') && parseQty(a.qty).gt(0)
       && (a.type !== 'crypto' || !matchesWallet(a, index)))
     .map(({ symbol, name, type, qty }) => ({ source: 'manual' as const, key: symbol, symbol, name, type, qty }));
-  const wallet = getWalletTokens(db).tokens
-    .filter((w) => parseQty(w.amount).gt(0))
-    .map((w) => ({
-      source: 'wallet' as const, key: w.asset_key ?? w.symbol, symbol: w.symbol, name: w.name,
-      type: 'crypto' as const, chains: w.chains,
-    }));
-  return [...manual, ...wallet];
+  const wallet = new Map<string, { source: 'wallet'; key: string; symbol: string; name: string; type: 'crypto'; chains: string[] }>();
+  const rows = db.prepare(`SELECT symbol, name, chain_id, amount, meta FROM wallet_positions
+    WHERE kind IN ('token', 'staking') AND CAST(amount AS REAL) > 0`).all() as
+    Array<{ symbol: string; name: string; chain_id: string; amount: string; meta: string }>;
+  for (const row of rows) {
+    const symbol = row.symbol.toUpperCase();
+    const meta = metaJson(row.meta);
+    const contract = [meta.mint, meta.token_id, meta.contract].find((value) => typeof value === 'string' && value.trim());
+    const address = typeof contract === 'string' ? contract.trim().replace(/^0x[\da-f]+$/i, (value) => value.toLowerCase()) : '';
+    const key = [symbol, row.chain_id, address].filter(Boolean).join(':');
+    if (!wallet.has(key)) wallet.set(key, { source: 'wallet', key, symbol, name: row.name, type: 'crypto', chains: [row.chain_id] });
+  }
+  return [...manual, ...wallet.values()];
 }
 
 /** Parse meta JSON tabel wallet_positions dengan aman. */
@@ -521,11 +528,12 @@ export function syncSupersedeFlags(db: Database.Database, index: WalletIndex): v
 export function getWalletTokens(
   db: Database.Database,
   opts: { minUsd?: number } = {},
-): { tokens: WalletTokenV[]; hiddenCount: number } {
+): { tokens: WalletTokenV[]; hiddenCount: number; unpriced: boolean } {
   const rate = getCachedUsdIdr(db);
   const basis = listCostBasis(db);
   const minUsd = opts.minUsd ?? 1;
   const groups = new Map<string, { symbol: string; name: string; amount: InstanceType<typeof Decimal>; valueUsd: number | null; chains: Set<string>; wallets: Set<string>; mint: string | null; addrByLabel: Map<string, string>; streamed: number; periodic: number }>();
+  let unpriced = false;
   try {
     const rows = db.prepare(
       `SELECT UPPER(wp.symbol) AS sym, wp.name, wp.amount, wp.value_usd, wp.chain_id, wp.meta, w.label AS label, w.address AS address
@@ -554,6 +562,7 @@ export function getWalletTokens(
         catch { g.periodic++; }
       } else g.periodic++;
       if (rowValue !== null && rowValue !== undefined) g.valueUsd = (g.valueUsd ?? 0) + rowValue;
+      else if (Number(r.amount) > 0) unpriced = true;
       if (!g.mint) {
         try {
           const m = (JSON.parse(r.meta) as Record<string, unknown>)?.mint;
@@ -567,7 +576,7 @@ export function getWalletTokens(
       if (!g.addrByLabel.has(r.label || 'Wallet') && r.address) g.addrByLabel.set(r.label || 'Wallet', r.address);
     }
   } catch {
-    return { tokens: [], hiddenCount: 0 };
+    return { tokens: [], hiddenCount: 0, unpriced: true };
   }
   const icons = readCachedIcons(db, [...groups.values()].map((g) => g.mint).filter((m): m is string => !!m));
   const out: WalletTokenV[] = [];
@@ -615,7 +624,7 @@ export function getWalletTokens(
       icon: g.mint ? (icons.get(g.mint) ?? null) : null,
     });
   }
-  return { tokens: out.sort((a, b) => (b.value_idr ?? 0) - (a.value_idr ?? 0)), hiddenCount };
+  return { tokens: out.sort((a, b) => (b.value_idr ?? 0) - (a.value_idr ?? 0)), hiddenCount, unpriced };
 }
 
 /** Agregasi posisi DeFi wallet (limit order dkk) per pair per arah.
@@ -625,7 +634,7 @@ export function getWalletTokens(
 export function getWalletDefi(
   db: Database.Database,
   opts: { minUsd?: number } = {},
-): { tokens: DefiV[]; hiddenCount: number } {
+): { tokens: DefiV[]; hiddenCount: number; unpriced: boolean } {
   const rate = getCachedUsdIdr(db);
   const minUsd = opts.minUsd ?? 1;
   const groups = new Map<
@@ -637,6 +646,7 @@ export function getWalletDefi(
       parts: Array<{ wallet: string; address: string; amount: string; valueUsd: number | null; filled: number | null }>;
     }
   >();
+  let unpriced = false;
   try {
     const rows = db.prepare(
       `SELECT UPPER(wp.symbol) AS sym, wp.name, wp.amount, wp.value_usd, wp.chain_id,
@@ -670,6 +680,7 @@ export function getWalletDefi(
         // Qty rusak dilewati, nilai tetap dijumlah bila ada.
       }
       if (r.value_usd !== null && r.value_usd !== undefined) g.valueUsd = (g.valueUsd ?? 0) + r.value_usd;
+      else if (Number(partAmt) > 0) unpriced = true;
       const filled = typeof m.filled_pct === 'number' ? m.filled_pct : null;
       if (filled !== null) {
         // Rata-rata tertimbang nilai (order lebih besar lebih menentukan).
@@ -687,7 +698,7 @@ export function getWalletDefi(
       g.wallets.add(r.label || 'Wallet');
     }
   } catch {
-    return { tokens: [], hiddenCount: 0 };
+    return { tokens: [], hiddenCount: 0, unpriced: true };
   }
   const out: DefiV[] = [];
   let hiddenCount = 0;
@@ -730,7 +741,7 @@ export function getWalletDefi(
       })),
     });
   }
-  return { tokens: out.sort((a, b) => (b.value_idr ?? 0) - (a.value_idr ?? 0)), hiddenCount };
+  return { tokens: out.sort((a, b) => (b.value_idr ?? 0) - (a.value_idr ?? 0)), hiddenCount, unpriced };
 }
 
 export function getUnifiedPortfolio(db: Database.Database, type?: AssetType, opts: { readOnly?: boolean } = {}): UnifiedPortfolio {
@@ -757,10 +768,10 @@ export function getUnifiedPortfolio(db: Database.Database, type?: AssetType, opt
     if (v.type === 'crypto' && !isLp && v.current_value_usd !== null && v.current_value_usd < 1) continue;
     assets.push({ ...v, source: 'manual', icon: v.mint ? (manualIcons.get(v.mint) ?? null) : null });
   }
-  const wt = !type || type === 'crypto' ? getWalletTokens(db) : { tokens: [], hiddenCount: 0 };
+  const wt = !type || type === 'crypto' ? getWalletTokens(db) : { tokens: [], hiddenCount: 0, unpriced: false };
   const walletTokens = wt.tokens;
   let hiddenTokens = wt.hiddenCount;
-  const defi = !type || type === 'crypto' ? getWalletDefi(db) : { tokens: [], hiddenCount: 0 };
+  const defi = !type || type === 'crypto' ? getWalletDefi(db) : { tokens: [], hiddenCount: 0, unpriced: false };
   const walletDefi = defi.tokens;
   hiddenTokens += defi.hiddenCount;
 
@@ -789,20 +800,25 @@ export function getUnifiedPortfolio(db: Database.Database, type?: AssetType, opt
   // (tidak menambah modal maupun P/L, hanya nilai).
   let lpValueIdr = 0;
   let lpFeesIdr = 0;
+  let lpUnpriced = false;
+  let missingFx = [...walletTokens, ...walletDefi].some((row) => row.value_usd !== null && row.value_idr === null);
   if (!type || type === 'crypto') {
     try {
       const lp = db.prepare(
         `SELECT COALESCE(SUM(COALESCE(position_value_usd,0)),0) AS v,
-                COALESCE(SUM(COALESCE(unclaimed_fees_usd,0)),0) AS f
+                COALESCE(SUM(COALESCE(unclaimed_fees_usd,0)),0) AS f,
+                COUNT(*) FILTER (WHERE position_value_usd IS NULL OR unclaimed_fees_usd IS NULL) AS unpriced
          FROM lp_positions`,
-      ).get() as { v: number; f: number };
+      ).get() as { v: number; f: number; unpriced: number };
       const rate = getCachedUsdIdr(db);
+      lpUnpriced = lp.unpriced > 0;
+      if (!rate && (lp.v > 0 || lp.f > 0)) missingFx = true;
       if (rate) {
         lpValueIdr = Math.round((lp.v + lp.f) * rate);
         lpFeesIdr = Math.round(lp.f * rate);
       }
     } catch {
-      // Tabel belum ada (DB lama) — LP dianggap nol.
+      lpUnpriced = true;
     }
     totalValue += lpValueIdr;
     byType.crypto = (byType.crypto ?? 0) + lpValueIdr;
@@ -816,7 +832,13 @@ export function getUnifiedPortfolio(db: Database.Database, type?: AssetType, opt
     ...(lpValueIdr > 0 ? [{ current_value_idr: lpValueIdr }] : []),
   ];
   const score = diversificationScore(divInput as AssetValuation[]);
+  const missingPrices: UnifiedPortfolio['valuation_coverage']['missing_prices'] = [];
+  if (unpricedManualAssets) missingPrices.push('manual');
+  if (wt.unpriced) missingPrices.push('wallet');
+  if (defi.unpriced) missingPrices.push('defi');
+  if (lpUnpriced) missingPrices.push('lp');
   return {
+    valuation_coverage: { complete: !missingPrices.length && !missingFx, missing_prices: missingPrices, missing_fx: missingFx },
     unpriced_manual_assets: unpricedManualAssets,
     assets,
     wallet_tokens: walletTokens,

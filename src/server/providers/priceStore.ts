@@ -47,16 +47,16 @@ export function storePrices(db: Database.Database, prices: Price[]): number {
  * Keep full resolution for the last 48h plus one point per day before that,
  * so sparklines can show real all-time curves without unbounded growth.
  */
-export function pruneHistory(db: Database.Database): void {
+export function pruneHistory(db: Database.Database, now = new Date().toISOString()): void {
   db.prepare(
     `DELETE FROM price_history WHERE rowid NOT IN (
-       SELECT rowid FROM price_history WHERE fetched_at > datetime('now', '-48 hours')
+       SELECT rowid FROM price_history WHERE fetched_at > datetime(@now, '-48 hours')
        UNION
        SELECT MAX(rowid) FROM price_history
-       WHERE fetched_at <= datetime('now', '-48 hours')
+       WHERE fetched_at <= datetime(@now, '-48 hours')
        GROUP BY symbol, date(fetched_at)
      )`,
-  ).run();
+  ).run({ now });
 }
 
 export function getPrices(db: Database.Database, symbols?: string[]) {

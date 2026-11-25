@@ -67,9 +67,11 @@ pm2 start ecosystem.config.cjs && pm2 save && pm2 startup
 sudo apt install -y caddy
 sudo cp Caddyfile.example /etc/caddy/Caddyfile && sudo nano /etc/caddy/Caddyfile
 sudo systemctl reload caddy
-# Backup cron (app juga backup internal via VACUUM INTO tiap 02:00):
-(crontab -l; echo "0 2 * * * /opt/dompet/scripts/backup.sh") | crontab -
 ```
+
+Aplikasi membuat backup SQLite terverifikasi setiap pukul 02:00 waktu server.
+Untuk backup manual setelah build, jalankan `bash scripts/backup.sh`. Lihat
+[panduan uji pemulihan](docs/portfolio-restore.md#uji-pemulihan-backup-sqlite-harian).
 
 Update: `git pull && npm ci && npm run build && pm2 startOrRestart ecosystem.config.cjs --only dompet-saya --update-env && pm2 save`.
 
@@ -107,6 +109,12 @@ ke VPS agar saldo, unit, dan modal tidak perlu diinput ulang.
   diperbarui otomatis tiap 5 menit. Debu <$1 dilewati.
 
 ## Wallet tracker + LP (otomatis, read-only)
+
+Di tab Posisi LP, **Pemantauan Meteora DLMM** menampilkan setiap posisi Solana,
+rentang bin, bin aktif, dan fees belum diklaim dalam satuan token. Pembacaan
+SDK memakai `SOLANA_RPC_URL`. RPC harus mendukung `getProgramAccounts` untuk
+program DLMM. Jika RPC bermasalah, snapshot terakhir ditandai tertunda. Nilai
+USD pada ringkasan LP tetap berasal dari agregat per pool.
 - Robinhood Chain mainnet **4663**: discovery ERC-20/NFT dari log transfer RPC,
   kemudian `balanceOf` dan `ownerOf` pada blok yang sama via Multicall3.
   LP aktif Uniswap v3/v4 yang dimiliki langsung dibaca dari kontrak resmi:

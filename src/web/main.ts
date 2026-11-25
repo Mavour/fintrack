@@ -15,6 +15,7 @@ import { renderLogin } from './pages/login.js';
 import { installCoinIconHandlers } from './lib/coinIcons.js';
 import { patchContent } from './lib/patchContent.js';
 import { isScrollActive, trackScrollActivity } from './lib/scrollActivity.js';
+import { fetchAppEntry, reloadAppUpdate } from './lib/appUpdate.js';
 
 const sidebar = document.getElementById('sidebar')!;
 const bottomnav = document.getElementById('bottomnav')!;
@@ -385,17 +386,17 @@ let updateShown = false;
 async function checkAppUpdate(): Promise<void> {
   if (updateShown) return;
   try {
-    const html = await (await fetch('/', { cache: 'no-store' })).text();
-    const m = /assets\/index-([^"']+)\.js/.exec(html);
-    if (!m) return;
+    const entry = await fetchAppEntry();
+    if (!entry) return;
     const cur = (document.querySelector('script[type="module"]') as HTMLScriptElement | null)?.src ?? '';
-    if (cur.includes(m[0])) return;
+    if (cur.includes(entry)) return;
     updateShown = true;
     const bar = document.createElement('div');
     bar.className = 'update-bar';
-    bar.innerHTML = `<span>Versi baru tersedia — muat ulang untuk tampilan terbaru.</span><button class="btn-primary" id="btn-update">Muat ulang</button>`;
+    bar.innerHTML = `<span role="status">Versi baru tersedia — muat ulang untuk tampilan terbaru.</span><button class="btn-primary" id="btn-update">Muat ulang</button>`;
     document.body.appendChild(bar);
-    document.getElementById('btn-update')!.onclick = () => location.reload();
+    const button = bar.querySelector('button')!;
+    button.onclick = () => void reloadAppUpdate(button, bar.querySelector('span')!);
   } catch {
     // Offline / gagal — coba lagi nanti.
   }

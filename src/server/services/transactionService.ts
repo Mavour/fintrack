@@ -2,7 +2,8 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { getAccount } from './accountService.js';
 import { parseQty } from './money.js';
-import { restoreWithdrawnAsset, withdrawAssetUnits, type WithdrawnAsset } from './portfolioService.js';
+import { listWithdrawalAssets, restoreWithdrawnAsset, withdrawAssetUnits, type WithdrawnAsset } from './portfolioService.js';
+import { normalizeTransactionTimestamp } from '../../shared/time.js';
 
 export const TxKindSchema = z.enum(['expense', 'income', 'transfer']);
 export type TxKind = z.infer<typeof TxKindSchema>;
@@ -34,6 +35,13 @@ export function createTransactionCategory(db: Database.Database, input: z.infer<
     .get(parsed.kind, parsed.name) as { kind: 'expense' | 'income'; name: string };
 }
 
+const OccurredAtSchema = z.string().transform((value, ctx) => {
+  const timestamp = normalizeTransactionTimestamp(value);
+  if (timestamp !== null) return timestamp;
+  ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Tanggal transaksi tidak valid' });
+  return z.NEVER;
+});
+
 export const CreateTxSchema = z.object({
   kind: z.enum(['expense', 'income', 'transfer', 'withdrawal']),
   amount_idr: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -41,7 +49,7 @@ export const CreateTxSchema = z.object({
   to_account_id: z.number().int().positive().nullable().optional(),
   category: z.string().min(1).max(60).default('Lainnya'),
   note: z.string().max(500).default(''),
-  occurred_at: z.string().optional(),
+  occurred_at: OccurredAtSchema.optional(),
 });
 export type CreateTxInput = z.infer<typeof CreateTxSchema>;
 
@@ -58,13 +66,13 @@ export const InvestmentWithdrawalSchema = z.discriminatedUnion('source', [
       catch { return false; }
     }, 'Masukkan jumlah unit yang lebih dari 0'),
   }),
-  InvestmentPaymentSchema.extend({ source: z.literal('wallet') }),
+  InvestmentPaymentSchema.extend({ source: z.literal('wallet'), asset_key: z.string().min(1).max(160).optional() }),
 ]);
 
 export const UpdateTxSchema = z.object({
   category: z.string().min(1).max(60).optional(),
   note: z.string().max(500).optional(),
-  occurred_at: z.string().optional(),
+  occurred_at: OccurredAtSchema.optional(),
   amount_idr: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   account_id: z.number().int().positive().optional(),
   to_account_id: z.number().int().positive().nullable().optional(),
@@ -82,9 +90,11 @@ export interface Tx {
   occurred_at: string;
   created_at: string;
   investment_symbol: string | null;
+  investment_asset_key: string | null;
 }
 
-const selectTransactions = `SELECT transactions.*, investment_withdrawals.symbol AS investment_symbol
+const selectTransactions = `SELECT transactions.*, investment_withdrawals.symbol AS investment_symbol,
+  investment_withdrawals.wallet_asset_key AS investment_asset_key
   FROM transactions LEFT JOIN investment_withdrawals ON transaction_id = transactions.id`;
 
 function getBalance(db: Database.Database, id: number): number {
@@ -192,12 +202,21 @@ export function createInvestmentWithdrawal(db: Database.Database, input: z.infer
   const { symbol } = payment;
   return db.transaction(() => {
     requireActiveBank(db, payment.account_id);
+    let walletKey: string | null = null;
+    if (payment.source === 'wallet') {
+      const matches = listWithdrawalAssets(db).filter((asset) => asset.source === 'wallet' && asset.symbol === symbol &&
+        (payment.asset_key === undefined || asset.key === payment.asset_key));
+      if (matches.length !== 1) {
+        throw Object.assign(new Error('Pilih aset wallet yang tersedia dan spesifik'), { statusCode: 400 });
+      }
+      walletKey = matches[0].key;
+    }
     // Manual holdings supply units. Wallet holdings are updated by the wallet sync.
     const withdrawn = payment.source === 'manual' ? withdrawAssetUnits(db, symbol, payment.qty) : null;
     const tx = createTransaction(db, { ...payment, kind: 'income', category: 'Pencairan Investasi' });
-    db.prepare('INSERT INTO investment_withdrawals (transaction_id, symbol, asset_id, qty, cost_idr) VALUES (?, ?, ?, ?, ?)')
-      .run(tx.id, symbol, withdrawn?.asset_id ?? null, withdrawn?.qty ?? null, withdrawn?.cost_idr ?? null);
-    return { ...tx, investment_symbol: symbol };
+    db.prepare('INSERT INTO investment_withdrawals (transaction_id, symbol, asset_id, qty, cost_idr, wallet_asset_key) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(tx.id, symbol, withdrawn?.asset_id ?? null, withdrawn?.qty ?? null, withdrawn?.cost_idr ?? null, walletKey);
+    return { ...tx, investment_symbol: symbol, investment_asset_key: walletKey };
   }).immediate();
 }
 

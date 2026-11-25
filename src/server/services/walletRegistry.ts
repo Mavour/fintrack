@@ -49,12 +49,10 @@ export function updateWallet(
     nextAddr = patch.address.trim();
   }
   try {
-    db.prepare('UPDATE wallets SET label = ?, address = ?, network_type = ? WHERE id = ?').run(
-      nextLabel,
-      nextAddr,
-      nextNet,
-      id,
-    );
+    db.transaction(() => {
+      db.prepare('UPDATE wallets SET label = ?, address = ?, network_type = ? WHERE id = ?').run(nextLabel, nextAddr, nextNet, id);
+      if (nextAddr !== cur.address) db.prepare('DELETE FROM meteora_dlmm_snapshots WHERE wallet_id = ?').run(id);
+    }).immediate();
   } catch (e) {
     if (String((e as Error).message).includes('UNIQUE')) {
       throw Object.assign(new Error('Alamat wallet sudah terdaftar'), { statusCode: 409 });
