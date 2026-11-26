@@ -129,7 +129,6 @@ function renderChrome(authenticated: boolean): void {
         <span><div class="brand-name">FinTrack</div><div class="brand-sub">Personal finance</div></span></div>
       <div class="nav-caption">WORKSPACE</div>
       <nav>${NAV.map((l) => `<a href="${l.hash}" ${h === l.hash ? 'aria-current="page"' : ''} class="${h === l.hash || (h === '' && l.hash === '#/') ? 'active' : ''}">${l.icon}<span>${l.label}</span><span class="nav-arrow" aria-hidden="true">↗</span></a>`).join('')}</nav>
-      <div class="side-note"><span class="side-note-icon">${icons.invest}</span><strong>Kenali keuangan Anda.</strong><p>Setiap langkah kecil berarti untuk tujuan yang lebih besar.</p><a href="#/portofolio">Jelajahi portofolio ↗</a></div>
       <div class="side-foot"><div class="side-profile"><span class="profile-avatar">${icons.wallet}</span><div><strong>Ruang pribadi</strong><div class="muted">Dompet Saya</div></div></div>${canLogout ? '<button class="btn-ghost btn-logout" id="btn-logout">Keluar</button>' : ''}</div>`;
   } else {
     sidebar.innerHTML = '';

@@ -840,12 +840,6 @@ body.login-full {
 #sidebar .brand-name { color: #f4f9f7; }
 #sidebar .brand-sub { color: #91aaa5; font-size: 11px; font-weight: 400; margin-top: 2px; }
 #sidebar .logo-box { width: 36px; height: 36px; border-radius: 10px; background: #2b6254; }
-.side-note { margin-top: 70px; padding: 18px 14px; border: 1px solid #31504a; border-radius: 14px; color: #e3eeea; background: #173831; }
-.side-note-icon { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid #4d7263; border-radius: 10px; color: #b2d4b5; margin-bottom: 14px; }
-.side-note-icon svg { width: 20px; height: 20px; }
-.side-note strong { font-size: 13px; font-weight: 550; }
-.side-note p { color: #9eb8ad; font-size: 12px; line-height: 1.7; margin: 8px 0 16px; }
-.side-note a { color: #b7d5c2; font-size: 11px; }
 .side-profile { display: flex; align-items: center; gap: 10px; color: #dfebe6; }
 .side-profile strong { font-size: 12px; font-weight: 550; }
 .side-profile .muted { color: #8eaca3; font-size: 11px; }
@@ -1051,9 +1045,6 @@ details[open] > summary .detail-toggle { transform: rotate(180deg); }
   #sidebar { padding-top: 22px; padding-bottom: 16px; }
   #sidebar .side-logo { padding-bottom: 20px; }
   #sidebar nav a { min-height: 44px; padding: 10px 12px; }
-  #sidebar .side-note { margin-top: 24px; padding: 14px; }
-  #sidebar .side-note-icon, #sidebar .side-note p { display: none; }
-  #sidebar .side-note a { display: block; margin-top: 8px; }
   #sidebar .side-foot { padding-top: 14px; }
   #topbar { padding-top: 14px; padding-bottom: 14px; }
   #pagehead { padding-top: 12px; }
